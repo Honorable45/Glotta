@@ -3,7 +3,8 @@ import { canOperate, coversVersion, encodeOfflineRequest, licenseStatus, signMes
 import { AppError } from '../core/errors';
 import type { DeviceIdentity } from '../services/deviceIdentity';
 
-const TIMEOUT_MS = 15_000;
+// Un serveur en veille met environ une minute à répondre : l'activation doit l'attendre.
+const TIMEOUT_MS = 90_000;
 const NOT_CONFIGURED = 'Le serveur des licences n’est pas configuré dans cette version. Utilisez l’activation hors ligne.';
 
 interface Stored {

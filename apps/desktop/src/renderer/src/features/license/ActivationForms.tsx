@@ -43,7 +43,7 @@ export function ActivationForms({ online, onActivated }: { online: boolean; onAc
         >
           {keyField}
           {error && <Alert>{error}</Alert>}
-          <Button type="submit" disabled={busy || !licenseKey.trim()}>Activer ce poste</Button>
+          <Button type="submit" disabled={busy || !licenseKey.trim()}>{busy ? 'Connexion au serveur, jusqu’à une minute…' : 'Activer ce poste'}</Button>
         </form>
       ) : (
         <div className="flex flex-col gap-4">

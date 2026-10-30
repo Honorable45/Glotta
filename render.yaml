@@ -1,22 +1,15 @@
-# Plateforme Glotta sur Render. La clé privée est demandée à la création et n'est jamais versionnée.
-databases:
-  - name: glotta-db
-    databaseName: glotta
-    user: glotta
-    plan: 0.1c-256mb
-    region: frankfurt
-    postgresMajorVersion: "16"
-
+# Plateforme Glotta sur l'offre gratuite de Render, avec une base Neon : la base gratuite de Render expire.
+# L'adresse de la base et la clé privée sont demandées à la création et ne sont jamais versionnées.
+# Sans Shell gratuit, les migrations se lancent depuis le poste de développement, avant le déploiement.
 services:
   - type: web
     name: glotta
     runtime: node
-    plan: 0.5c-512mb
+    plan: free
     region: frankfurt
     branch: main
     # --prod=false : Prisma et Vite sont nécessaires au build, même avec NODE_ENV=production.
     buildCommand: npx -y pnpm@9.15.9 install --frozen-lockfile --prod=false --ignore-scripts --filter @gestion/api... --filter @gestion/admin... && npx -y pnpm@9.15.9 --filter @gestion/api generate && npx -y pnpm@9.15.9 --filter @gestion/admin build
-    preDeployCommand: cd apps/api && ../../node_modules/.bin/prisma migrate deploy
     startCommand: cd apps/api && ../../node_modules/.bin/tsx src/server.ts
     healthCheckPath: /health
     envVars:
@@ -29,8 +22,6 @@ services:
       - key: ADMIN_DIST
         value: /opt/render/project/src/apps/admin/dist
       - key: DATABASE_URL
-        fromDatabase:
-          name: glotta-db
-          property: connectionString
+        sync: false
       - key: LICENSE_PRIVATE_KEY
         sync: false
