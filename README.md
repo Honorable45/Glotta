@@ -1,6 +1,6 @@
 # Gestion Commerciale
 
-Logiciel desktop de gestion commerciale pour Windows, utilisable hors ligne, avec abonnement mensuel et administration centrale.
+Logiciel desktop de gestion commerciale pour Windows, utilisable hors ligne, vendu en licence à vie, avec une plateforme web privée de gestion des clients, ventes et licences.
 
 ## Commandes
 
@@ -18,9 +18,9 @@ Le déploiement du serveur et de l'installateur est décrit dans [docs/DEPLOIEME
 ## Structure
 
 - `apps/desktop` : application Electron (`main`, `preload`, `renderer`).
-- `apps/api` : API centrale : abonnements, licences, paiements, relais de synchronisation.
-- `apps/admin` : console d'administration, servie par l'API sur `/console/`.
-- `packages/contracts` : canaux IPC, schémas de validation, niveau d'accès et droits de formule de chaque canal.
+- `apps/api` : API centrale : activation, statut et transfert des licences, ventes, reçus PDF, relais de synchronisation.
+- `apps/admin` : plateforme web privée, responsive, servie par l'API sur `/console/`.
+- `packages/contracts` : canaux IPC, schémas de validation, niveau d'accès et droits d'édition de chaque canal.
 - `packages/domain` : règles pures : montants, ventes, retours, permissions, WhatsApp.
 - `packages/license` : signature et vérification des licences, mots de passe.
 - `packages/db-local` : schéma Prisma local, migrations, journal d'activité.
@@ -35,6 +35,15 @@ Le déploiement du serveur et de l'installateur est décrit dans [docs/DEPLOIEME
 - Les historiques financiers et de stock sont en ajout seul, protégés par des déclencheurs SQL.
 - Les montants et quantités sont des entiers : jamais de flottants.
 - Une entrée de navigation n'est ajoutée que si son module fonctionne réellement.
+
+## Règles de la licence
+
+- La clé privée de signature reste sur le serveur. Le logiciel ne contient que la clé publique.
+- Un statut ne change sur le poste que par un jeton signé, destiné à ce poste, et pas plus ancien que l'actuel.
+- Ni la date ni le réseau n'interviennent pour une licence à vie. Seul un essai a une date de fin.
+- Une licence bloquée laisse la consultation et l'export ouverts : la base locale n'est jamais touchée.
+- Le droit aux versions est contrôlé au démarrage, avant toute migration.
+- Une licence n'est délivrée que par la confirmation du paiement sur la plateforme.
 
 ## Ajouter une migration locale
 

@@ -1,11 +1,12 @@
 import type { BackupStatus } from '@gestion/contracts';
 import type { PrismaClient } from '@gestion/db-local';
 import { join } from 'node:path';
-import { backupFileName, ensureFolder, generateRecoveryCode, listBackups, pruneBackups, writeBackup } from './backup';
+import { backupFileName, ensureFolder, generateRecoveryCode, listBackups, normalizeCode, pruneBackups, writeBackup } from './backup';
 
 const CODE_KEY = 'backup.recoveryCode';
 const FOLDER_KEY = 'backup.folder';
 const LAST_KEY = 'backup.lastAt';
+const CONFIRMED_KEY = 'backup.codeConfirmed';
 const KEEP = 14;
 const DAY = 86_400_000;
 
@@ -41,6 +42,14 @@ export function createBackupManager(input: { db: PrismaClient; databasePath: str
     status,
     create,
     recoveryCode,
+    codeConfirmed: async () => (await read(CONFIRMED_KEY)) === '1',
+    markCodeConfirmed: () => write(CONFIRMED_KEY, '1'),
+    /** La recopie prouve que le code a bien été noté, seul moyen de restaurer sur un autre ordinateur. */
+    async confirmCode(code: string) {
+      const matches = normalizeCode(code) === normalizeCode(await recoveryCode());
+      if (matches) await write(CONFIRMED_KEY, '1');
+      return matches;
+    },
     async setFolder(path: string) {
       await write(FOLDER_KEY, path);
       return status();

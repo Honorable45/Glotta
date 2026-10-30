@@ -6,10 +6,11 @@
 cd apps/api && npx tsx scripts/generate-keys.ts
 ```
 
-- La clé privée va dans la variable `LICENSE_PRIVATE_KEY` du serveur. Elle ne doit jamais être partagée ni versionnée : elle permet d'émettre des licences.
+- La clé privée va dans la variable `LICENSE_PRIVATE_KEY` du serveur. Elle permet d'émettre des licences et chiffre les clés de licence au repos : ne la partagez et ne la versionnez jamais.
+- Conservez-en une copie hors du serveur. Sans elle, les postes déjà installés n'accepteront plus aucune réponse du serveur, et les clés enregistrées ne seront plus lisibles.
 - La clé publique va dans `apps/desktop/resources/license-public.pem` avant le build.
 
-## 2. Déployer l'API
+## 2. Déployer l'API et la plateforme
 
 Prérequis : Node 22 ou plus, PostgreSQL 16 et un reverse proxy HTTPS.
 
@@ -24,17 +25,27 @@ pnpm --filter @gestion/api migrate
 pnpm --filter @gestion/api start
 ```
 
-Le serveur écoute sur `127.0.0.1:8080` (`HOST` et `PORT` pour changer). Il doit être placé derrière HTTPS.
+Le serveur écoute sur `127.0.0.1:8080` (`HOST` et `PORT` pour changer). Il doit être placé derrière HTTPS. `GET /health` vérifie le serveur et sa base.
 
-## 3. Créer l'administrateur
+## 3. Créer le compte propriétaire
 
 ```bash
 cd apps/api && npx tsx scripts/create-admin.ts admin@exemple.tg "mot de passe de 12 caractères"
 ```
 
-Ajoutez la clé affichée dans une application d'authentification, puis connectez-vous sur `https://votre-domaine/console/`.
+Ajoutez la clé affichée dans une application d'authentification, puis connectez-vous sur `https://votre-domaine/console/`. Les autres comptes se créent ensuite dans Paramètres.
 
-## 4. Générer l'installateur
+## 4. Sauvegarder la base du serveur
+
+```bash
+BACKUP_DIR=/chemin/sauvegardes apps/api/scripts/backup-db.sh
+```
+
+À programmer chaque jour, avec un dossier hors du serveur. Le script garde les 30 derniers fichiers. Pour restaurer : `pg_restore --clean --if-exists -d "$DATABASE_URL" fichier.dump`.
+
+Les données de vos clients ne sont pas dans cette base : les enveloppes de synchronisation sont chiffrées sur les postes, et le serveur ne peut pas les lire.
+
+## 5. Générer l'installateur
 
 Sur Windows, ou via le workflow GitHub `windows.yml` (variables `API_URL` et `LICENSE_PUBLIC_KEY`) :
 
@@ -44,8 +55,20 @@ MAIN_VITE_API_URL=https://votre-domaine pnpm dist:win
 
 Sans certificat de signature de code, Windows SmartScreen avertit à l'installation.
 
-## 5. Brancher un prestataire de paiement
+## 6. Vendre une licence
 
-Tant que `providers` est vide dans `apps/api/src/server.ts`, le paiement en ligne est refusé avec un message clair. Pour en brancher un, implémentez `PaymentProvider` (`apps/api/src/providers.ts`) d'après sa documentation officielle, et testez-le avec votre compte marchand. La notification ne valide jamais seule un paiement : `fetchStatus` doit interroger le prestataire.
+1. **Éditions et tarifs** : créez vos éditions. Aucun prix n'existe dans le code.
+2. **Clients** : créez le client.
+3. **Ventes** : créez la vente, qui reste en attente, sans clé disponible.
+4. Après réception réelle du paiement, **Confirmer le paiement** délivre la licence.
+5. Ouvrez la licence, **Afficher la clé**, et transmettez-la au client. Le reçu PDF se télécharge depuis la vente.
 
-Déclarez ensuite l'adresse `https://votre-domaine/v1/payments/webhook/<nom>` chez le prestataire. En attendant, l'activation manuelle se fait dans la console (« Prolonger », avec motif journalisé).
+Sans Internet chez le client : il crée une demande dans le logiciel et vous la remet. Dans **Licences**, **Activation hors ligne** produit un fichier de licence signé à lui rendre.
+
+## 7. Publier une grande version
+
+1. Publiez la version dans **Versions**.
+2. Créez ou modifiez l'édition avec la nouvelle grande version couverte.
+3. Pour un client existant, une vente de mise à niveau n'est disponible que par l'API (`upgradeLicenseId` sur `POST /admin/sales`).
+
+Une licence reste valide pour les versions qu'elle couvre. Une grande version non couverte refuse de démarrer sans modifier les données, et le client peut réinstaller sa version.

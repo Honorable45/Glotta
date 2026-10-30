@@ -78,6 +78,8 @@ export const channels = [
   'backup.status',
   'backup.create',
   'backup.revealCode',
+  'backup.codeStatus',
+  'backup.confirmCode',
   'backup.chooseFolder',
   'backup.restore',
   'sync.status',
@@ -90,12 +92,13 @@ export const channels = [
   'stores.setCurrent',
   'system.checkUpdate',
   'license.state',
-  'license.plans',
-  'license.signup',
   'license.activate',
   'license.refresh',
-  'license.pay',
-  'license.paymentStatus',
+  'license.transfer',
+  'license.offlineRequest',
+  'license.saveRequest',
+  'license.importToken',
+  'license.importFile',
 ] as const;
 
 export type Channel = (typeof channels)[number];

@@ -13,7 +13,7 @@ export function SystemPage() {
   const checkUpdate = () => {
     setUpdate(null);
     call('system.checkUpdate', undefined)
-      .then((result) => setUpdate(result.available ? `Version ${result.version} ouverte dans votre navigateur.` : 'Votre logiciel est à jour.'))
+      .then((result) => setUpdate(!result.available ? 'Votre logiciel est à jour.' : result.covered ? `Version ${result.version} ouverte dans votre navigateur.` : `La version ${result.version} est disponible, mais votre licence ne la couvre pas. Votre licence actuelle reste valide. Contactez votre vendeur pour l'obtenir.`))
       .catch((cause: Error) => setUpdate(cause.message));
   };
 

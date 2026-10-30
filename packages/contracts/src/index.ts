@@ -424,24 +424,23 @@ const auditEntrySchema = z.object({
 export type AuditEntry = z.infer<typeof auditEntrySchema>;
 
 const licenseStateSchema = z.object({
-  /** Faux si cette version n'a ni adresse de serveur ni clé publique. */
+  /** Faux si cette version n'a pas de clé publique : aucune licence ne peut y être vérifiée. */
   configured: z.boolean(),
-  status: z.enum(['NONE', 'ACTIVE', 'EXPIRING', 'GRACE', 'EXPIRED', 'SUSPENDED', 'OFFLINE_EXPIRED', 'CLOCK_TAMPERED']),
+  /** Faux sans adresse de serveur : seule l'activation hors ligne est possible. */
+  online: z.boolean(),
+  status: z.enum(['NONE', 'ACTIVE', 'TRIAL', 'TRIAL_ENDED', 'SUSPENDED', 'REVOKED']),
   canOperate: z.boolean(),
-  planCode: z.string().nullable(),
+  editionName: z.string().nullable(),
   isTrial: z.boolean(),
-  expiresAt: z.string().nullable(),
-  graceUntil: z.string().nullable(),
+  trialEndsAt: z.string().nullable(),
   features: z.array(z.string()),
   maxUsers: z.number().int().nullable(),
+  maxMajorVersion: z.number().int().nullable(),
 });
 export type LicenseState = z.infer<typeof licenseStateSchema>;
 
-const planSchema = z.object({ code: z.string(), name: z.string(), price: z.number().int(), maxUsers: z.number().int(), maxStores: z.number().int(), features: z.array(z.string()) });
-export type PlanItem = z.infer<typeof planSchema>;
+const licenseKeySchema = z.string().trim().min(10, 'Saisissez votre clé de licence.').max(60);
 
-const emailSchema = z.email('Adresse email invalide');
-const accountPassword = z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères.').max(200);
 
 const reminderSchema = z.object({
   id: z.string(),
@@ -620,27 +619,30 @@ export const contract = {
   'backup.status': { input: z.undefined(), output: backupStatusSchema },
   'backup.create': { input: z.undefined(), output: backupStatusSchema },
   'backup.revealCode': { input: z.undefined(), output: z.object({ code: z.string() }) },
+  'backup.codeStatus': { input: z.undefined(), output: z.object({ confirmed: z.boolean() }) },
+  'backup.confirmCode': { input: z.object({ code: z.string().trim().min(10).max(100) }).strict(), output: z.object({ confirmed: z.boolean() }) },
   'backup.chooseFolder': { input: z.undefined(), output: backupStatusSchema },
   'backup.restore': { input: z.object({ code: z.string().trim().min(10).max(100) }).strict(), output: z.object({ restored: z.boolean() }) },
   'sync.status': { input: z.undefined(), output: syncStatusSchema },
   'sync.enable': { input: z.undefined(), output: syncStatusSchema },
   'sync.run': { input: z.undefined(), output: syncStatusSchema },
   'sync.join': {
-    input: z.object({ email: z.email('Adresse email invalide'), password: z.string().min(8).max(200), code: z.string().trim().min(10).max(100) }).strict(),
+    input: z.object({ licenseKey: licenseKeySchema, code: z.string().trim().min(10).max(100) }).strict(),
     output: z.object({ joined: z.boolean() }),
   },
   'sync.resolveConflict': { input: idInput, output: syncStatusSchema },
   'stores.list': { input: z.undefined(), output: z.array(storeSchema) },
   'stores.save': { input: z.object({ id: idOrNull, name }).strict(), output: storeSchema },
   'stores.setCurrent': { input: idInput, output: z.array(storeSchema) },
-  'system.checkUpdate': { input: z.undefined(), output: z.object({ available: z.boolean(), version: z.string().nullable(), notes: z.string().nullable() }) },
+  'system.checkUpdate': { input: z.undefined(), output: z.object({ available: z.boolean(), covered: z.boolean(), version: z.string().nullable(), notes: z.string().nullable() }) },
   'license.state': { input: z.undefined(), output: licenseStateSchema },
-  'license.plans': { input: z.undefined(), output: z.array(planSchema) },
-  'license.signup': { input: z.object({ email: emailSchema, password: accountPassword }).strict(), output: licenseStateSchema },
-  'license.activate': { input: z.object({ email: emailSchema, password: accountPassword }).strict(), output: licenseStateSchema },
+  'license.activate': { input: z.object({ licenseKey: licenseKeySchema }).strict(), output: licenseStateSchema },
   'license.refresh': { input: z.undefined(), output: licenseStateSchema },
-  'license.pay': { input: z.object({ planCode: z.string().min(1).max(40), months: z.number().int().min(1).max(12) }).strict(), output: z.object({ intentId: z.string() }) },
-  'license.paymentStatus': { input: z.object({ intentId: z.string().min(1) }).strict(), output: z.object({ status: z.string() }) },
+  'license.transfer': { input: z.undefined(), output: licenseStateSchema },
+  'license.offlineRequest': { input: z.object({ licenseKey: licenseKeySchema }).strict(), output: z.object({ request: z.string() }) },
+  'license.saveRequest': { input: z.object({ request: z.string().min(10).max(8000) }).strict(), output: z.object({ path: z.string().nullable() }) },
+  'license.importToken': { input: z.object({ token: z.string().trim().min(10).max(8000) }).strict(), output: licenseStateSchema },
+  'license.importFile': { input: z.undefined(), output: licenseStateSchema },
 } satisfies Record<Channel, { input: z.ZodType; output: z.ZodType }>;
 
 export type Input<C extends Channel> = z.infer<(typeof contract)[C]['input']>;
@@ -729,6 +731,8 @@ export const channelAccess: Record<Channel, 'public' | 'authenticated' | Permiss
   'backup.status': 'manage_settings',
   'backup.create': 'manage_settings',
   'backup.revealCode': 'manage_settings',
+  'backup.codeStatus': 'authenticated',
+  'backup.confirmCode': 'manage_settings',
   'backup.chooseFolder': 'manage_settings',
   'backup.restore': 'manage_settings',
   'sync.status': 'manage_settings',
@@ -741,12 +745,13 @@ export const channelAccess: Record<Channel, 'public' | 'authenticated' | Permiss
   'stores.setCurrent': 'manage_settings',
   'system.checkUpdate': 'authenticated',
   'license.state': 'authenticated',
-  'license.plans': 'authenticated',
-  'license.signup': 'manage_settings',
   'license.activate': 'manage_settings',
   'license.refresh': 'authenticated',
-  'license.pay': 'manage_settings',
-  'license.paymentStatus': 'manage_settings',
+  'license.transfer': 'manage_settings',
+  'license.offlineRequest': 'manage_settings',
+  'license.saveRequest': 'manage_settings',
+  'license.importToken': 'manage_settings',
+  'license.importFile': 'manage_settings',
 };
 
 export type ErrorCode = 'UNAUTHENTICATED' | 'FORBIDDEN' | 'INVALID_INPUT' | 'UNKNOWN_CHANNEL' | 'NOT_FOUND' | 'CONFLICT' | 'INTERNAL';

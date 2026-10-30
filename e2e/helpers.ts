@@ -5,19 +5,15 @@ import { generateLicenseKeys, signLicense, type LicensePayload } from '../packag
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 
 const keys = generateLicenseKeys();
-const day = 86_400_000;
+export const testPublicKey = keys.publicKeyPem;
 
 /** Licence réellement signée : l'application la vérifie comme en production. */
 export function testLicense(changes: Partial<LicensePayload> = {}): string {
-  const now = Date.now();
   return signLicense(
     {
-      tenantId: 'test', deviceId: 'test', planCode: 'BUSINESS', isTrial: false, suspended: false, maxUsers: 15, maxStores: 100,
-      features: ['advanced_debts', 'reminders', 'expenses', 'cash', 'advanced_reports', 'export_files', 'multi_store', 'consolidated', 'advanced_permissions'],
-      expiresAt: new Date(now + 30 * day).toISOString(),
-      graceUntil: new Date(now + 33 * day).toISOString(),
-      offlineUntil: new Date(now + 7 * day).toISOString(),
-      issuedAt: new Date(now).toISOString(),
+      v: 2, licenseId: 'test', activationId: 'test', deviceFingerprint: 'test', editionCode: 'COMPLETE', editionName: 'Complète', isTrial: false, trialEndsAt: null, status: 'ACTIVE', maxUsers: 15, maxStores: 100, maxMajorVersion: 1,
+      features: ['advanced_debts', 'reminders', 'expenses', 'cash', 'advanced_reports', 'export_files', 'multi_store', 'consolidated', 'advanced_permissions', 'sync'],
+      issuedAt: new Date().toISOString(),
       ...changes,
     },
     keys.privateKeyPem,
@@ -48,14 +44,24 @@ export async function login(page: Page, name = 'patron', password = 'motdepasse'
   await page.getByRole('navigation', { name: 'Navigation principale' }).waitFor();
 }
 
-/** Lance le logiciel relié à un vrai serveur d'abonnements. */
-export async function launchWithServer(userData: string, apiUrl: string, publicKey: string): Promise<{ app: ElectronApplication; page: Page }> {
+/** Lance le logiciel relié à un vrai serveur de licences. */
+export async function launchWithServer(userData: string, apiUrl: string | null, publicKey: string): Promise<{ app: ElectronApplication; page: Page }> {
   const { ELECTRON_RUN_AS_NODE: _ignored, ...env } = process.env;
   const app = await electron.launch({
     args: [resolve('apps/desktop')],
-    env: { ...env, GESTION_USER_DATA: userData, GESTION_ALLOW_BASIC_STORAGE: '1', GESTION_LICENSE_PUBLIC_KEY: publicKey, GESTION_API_URL: apiUrl } as Record<string, string>,
+    env: { ...env, GESTION_USER_DATA: userData, GESTION_ALLOW_BASIC_STORAGE: '1', GESTION_LICENSE_PUBLIC_KEY: publicKey, ...(apiUrl ? { GESTION_API_URL: apiUrl } : {}) } as Record<string, string>,
   });
   return { app, page: await app.firstWindow() };
+}
+
+/** Le code de récupération est imposé au premier lancement. */
+export async function confirmRecoveryCode(page: Page): Promise<string> {
+  const code = page.getByTestId('first-recovery-code');
+  await code.waitFor();
+  const text = (await code.textContent())!;
+  await page.getByLabel('Recopiez le code pour confirmer').fill(text);
+  await page.getByRole('button', { name: "J'ai noté mon code" }).click();
+  return text;
 }
 
 /** Passe l'assistant par l'interface, comme un commerçant. */
@@ -72,5 +78,6 @@ export async function completeWizard(page: Page, sector = 'Téléphonie', expect
   await page.getByLabel(/^Mot de passe/).fill('motdepasse');
   await page.getByLabel('Confirmer le mot de passe').fill('motdepasse');
   await page.getByRole('button', { name: 'Terminer la configuration' }).click();
+  await confirmRecoveryCode(page);
   if (expectNav) await page.getByRole('navigation', { name: 'Navigation principale' }).waitFor();
 }

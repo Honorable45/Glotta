@@ -8,6 +8,7 @@ import { checkIntegrity, createClient, migrate, recordChange } from '@gestion/db
 import { authorize, currentUserId, runWithRequest } from './core/session';
 import { createAuthService } from './modules/auth.service';
 import { createLicenseService } from './modules/license.service';
+import { fileLicenseStore, loadDeviceIdentity } from './services/deviceIdentity';
 import { createCatalogService } from './modules/catalog.service';
 import { createCompanyService } from './modules/company.service';
 import { createCustomersService } from './modules/customers.service';
@@ -118,6 +119,30 @@ async function start(): Promise<void> {
   hardenSession();
 
   const userData = app.getPath('userData');
+  const appVersion = (!app.isPackaged && process.env['GESTION_TEST_APP_VERSION']) || app.getVersion();
+  const license = createLicenseService({
+    store: fileLicenseStore(join(userData, 'licence.json')),
+    identity: await loadDeviceIdentity(join(userData, 'poste.key'), protector()),
+    apiUrl: (!app.isPackaged && process.env['GESTION_API_URL']) || import.meta.env['MAIN_VITE_API_URL'] || null,
+    publicKey: readPublicKey(),
+    deviceName: hostname(),
+    appVersion,
+    testToken: app.isPackaged ? null : (process.env['GESTION_TEST_LICENSE'] ?? null),
+  });
+  license.load();
+
+  // Avant toute migration : une grande version non couverte repart sans avoir modifié les données.
+  if (!license.coversApp()) {
+    await license.refresh().catch(() => undefined);
+    if (!license.coversApp()) {
+      const message = `Votre licence reste valide et vos données sont intactes, mais elle couvre les versions jusqu'à ${license.maxMajorVersion()}.x, alors que ce logiciel est en version ${appVersion}. Réinstallez une version couverte ou contactez votre vendeur pour obtenir cette version.`;
+      console.error(message);
+      if (!process.env['GESTION_TEST_APP_VERSION']) await dialog.showMessageBox({ type: 'warning', title: 'Version non couverte par votre licence', message });
+      app.exit(3);
+      return;
+    }
+  }
+
   const databasePath = join(userData, 'gestion.db');
   const keyPath = join(userData, 'gestion.key');
   const encryptionKey = await loadOrCreateKey(keyPath, databasePath, protector());
@@ -180,15 +205,6 @@ async function start(): Promise<void> {
     return { path: filePath };
   }
 
-  const license = createLicenseService({
-    db,
-    deviceId,
-    apiUrl: (!app.isPackaged && process.env['GESTION_API_URL']) || import.meta.env['MAIN_VITE_API_URL'] || null,
-    publicKey: readPublicKey(),
-    deviceName: hostname(),
-    testToken: app.isPackaged ? null : (process.env['GESTION_TEST_LICENSE'] ?? null),
-  });
-  await license.load();
   const auth = createAuthService({ db, deviceId, maxUsers: () => license.limits().maxUsers });
 
   const reminders = createRemindersService({
@@ -225,6 +241,23 @@ async function start(): Promise<void> {
     }
     setImmediate(() => { app.relaunch(); app.exit(0); });
     return { restored: true };
+  }
+
+  async function saveActivationRequest(request: string) {
+    const parent = BrowserWindow.getFocusedWindow();
+    const options = { title: "Enregistrer la demande d'activation", defaultPath: 'demande-activation.gcdemande', filters: [{ name: "Demande d'activation", extensions: ['gcdemande'] }] };
+    const { canceled, filePath } = await (parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options));
+    if (canceled || !filePath) return { path: null };
+    await writeFile(filePath, request);
+    return { path: filePath };
+  }
+
+  async function importLicenseFile() {
+    const parent = BrowserWindow.getFocusedWindow();
+    const options = { title: 'Choisir le fichier de licence', properties: ['openFile' as const], filters: [{ name: 'Fichier de licence', extensions: ['gclicence'] }] };
+    const { canceled, filePaths } = await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options));
+    const [path] = filePaths;
+    return canceled || !path ? license.state() : license.importToken(readFileSync(path, 'utf8'));
   }
 
   const notified = new Set<string>();
@@ -340,6 +373,11 @@ async function start(): Promise<void> {
         await db.$transaction((tx) => recordChange(tx, { deviceId, actorId: currentUserId(), action: 'backup.code.reveal', entityType: 'Setting', entityId: 'recovery', details: {}, sync: false }));
         return { code };
       },
+      'backup.codeStatus': async () => ({ confirmed: await backups.codeConfirmed() }),
+      'backup.confirmCode': async ({ code }) => {
+        if (!(await backups.confirmCode(code))) throw new AppError('CONFLICT', 'Ce code ne correspond pas. Vérifiez ce que vous avez noté.');
+        return { confirmed: true };
+      },
       'backup.chooseFolder': () => chooseBackupFolder(),
       'backup.restore': ({ code }) => restoreFromFile(code),
       'sync.status': () => sync.status(),
@@ -348,11 +386,13 @@ async function start(): Promise<void> {
         return sync.enable();
       },
       'sync.run': () => sync.run(),
-      'sync.join': async ({ email, password, code }) => {
+      'sync.join': async ({ licenseKey, code }) => {
         // Refusé d'emblée si le poste contient déjà une entreprise, avant tout appel au serveur.
         if ((await company.getSetupState()).completed) throw new AppError('CONFLICT', 'Ce poste contient déjà une entreprise.');
-        await license.activate(email, password);
+        await license.activate(licenseKey);
         await sync.join(normalizeRecovery(code));
+        // Saisi à la main sur ce poste : il est donc déjà noté.
+        await backups.markCodeConfirmed();
         return { joined: true };
       },
       'sync.resolveConflict': ({ id }) => sync.resolveConflict(id),
@@ -364,23 +404,21 @@ async function start(): Promise<void> {
       },
       'system.checkUpdate': async () => {
         const latest = await license.latestRelease();
-        if (!latest || !isNewerVersion(latest.version, app.getVersion())) return { available: false, version: null, notes: null };
+        if (!latest || !isNewerVersion(latest.version, app.getVersion())) return { available: false, covered: true, version: null, notes: null };
+        // Une grande version vendue séparément est annoncée, sans inciter à installer ce qui ne démarrerait pas.
+        if (!license.covers(latest.version)) return { available: true, covered: false, version: latest.version, notes: latest.notes };
         // Ouvert dans le navigateur : Windows vérifie la signature de l'installateur au lancement.
         if (latest.url.startsWith('https://')) await shell.openExternal(latest.url);
-        return { available: true, version: latest.version, notes: latest.notes };
+        return { available: true, covered: true, version: latest.version, notes: latest.notes };
       },
       'license.state': () => license.state(),
-      'license.plans': () => license.plans(),
-      'license.signup': async ({ email, password }) => license.signup(email, password, (await company.getCompany()).name),
-      'license.activate': ({ email, password }) => license.activate(email, password),
+      'license.activate': ({ licenseKey }) => license.activate(licenseKey),
       'license.refresh': () => license.refresh(),
-      'license.pay': async ({ planCode, months }) => {
-        const { intentId, payUrl } = await license.pay(planCode, months);
-        // Le navigateur du système affiche la page du prestataire : l'application ne voit aucune donnée de paiement.
-        if (payUrl.startsWith('https://')) await shell.openExternal(payUrl);
-        return { intentId };
-      },
-      'license.paymentStatus': ({ intentId }) => license.paymentStatus(intentId),
+      'license.transfer': () => license.transfer(),
+      'license.offlineRequest': ({ licenseKey }) => ({ request: license.offlineRequest(licenseKey) }),
+      'license.saveRequest': ({ request }) => saveActivationRequest(request),
+      'license.importToken': ({ token }) => license.importToken(token),
+      'license.importFile': () => importLicenseFile(),
       'sales.print': async ({ saleId, format }) =>
         printHtml(buildReceiptHtml({ sale: await sales.detail(saleId), company: await company.getCompany(), format })),
     },

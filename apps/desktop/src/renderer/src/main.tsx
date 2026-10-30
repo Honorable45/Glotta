@@ -1,9 +1,10 @@
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './app/Layout';
 import { ActivationPage } from './features/license/ActivationPage';
-import { SubscriptionPage } from './features/license/SubscriptionPage';
+import { LicensePage } from './features/license/LicensePage';
+import { RecoveryGate } from './features/backup/RecoveryGate';
 import { LicenseProvider, useLicense } from './lib/license';
 import { BackupPage } from './features/backup/BackupPage';
 import { RemindersPage } from './features/reminders/RemindersPage';
@@ -35,7 +36,9 @@ function App() {
   if (!session) return <LoginPage />;
   return (
     <LicenseProvider>
-      <Licensed />
+      <RecoveryGate>
+        <Licensed />
+      </RecoveryGate>
     </LicenseProvider>
   );
 }
@@ -43,8 +46,10 @@ function App() {
 function Licensed() {
   const { can } = useSession();
   const { license } = useLicense();
+  const [browsing, setBrowsing] = useState(false);
   if (!license) return null;
-  if (license.status === 'NONE') return <ActivationPage />;
+  // La consultation reste toujours possible : l'activation ne retient jamais les données.
+  if (license.status === 'NONE' && !browsing) return <ActivationPage onBrowse={() => setBrowsing(true)} />;
   const home = navigation.find((item) => !item.permission || can(item.permission))?.path ?? '/systeme';
   return (
     <HashRouter>
@@ -66,7 +71,7 @@ function Licensed() {
           <Route path="/rappels" element={<RemindersPage />} />
           <Route path="/sauvegardes" element={<BackupPage />} />
           <Route path="/synchronisation" element={<SyncPage />} />
-          <Route path="/abonnement" element={<SubscriptionPage />} />
+          <Route path="/licence" element={<LicensePage />} />
           <Route path="/systeme" element={<SystemPage />} />
           <Route path="/parametres/*" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />

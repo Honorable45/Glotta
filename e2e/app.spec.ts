@@ -70,7 +70,7 @@ test('conserve le thème et le journal après redémarrage', async () => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('link', { name: 'État du système' }).click();
   const row = page.locator('div', { has: page.getByText('Opérations journalisées') }).last();
-  await expect(row).toContainText('3');
+  await expect(row).toContainText('4');
   await expect(page.getByText('Non altéré', { exact: true })).toBeVisible();
   await app.close();
 });

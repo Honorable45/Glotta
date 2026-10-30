@@ -2,7 +2,7 @@ import type { PlanFeature } from '@gestion/license/features';
 import type { Channel } from './channels';
 
 /**
- * Canaux qui modifient l'activité : bloqués quand l'abonnement ne permet plus d'opérer.
+ * Canaux qui modifient l'activité : bloqués quand la licence ne permet pas d'opérer.
  * La consultation et l'export restent ouverts, conformément à l'engagement de ne jamais retenir les données.
  */
 export const writeChannels: readonly Channel[] = [
@@ -13,10 +13,11 @@ export const writeChannels: readonly Channel[] = [
   'units.save', 'units.archive', 'paymentMethods.save', 'stockSettings.save', 'company.update',
 ];
 
-/** Fonctions réservées à certaines formules. */
+/** Fonctions réservées à certaines éditions. */
 export const channelFeatures: Partial<Record<Channel, PlanFeature>> = {
   'debts.setDueDate': 'advanced_debts',
   'stores.save': 'multi_store',
+  'sync.enable': 'sync',
   'reminders.list': 'reminders',
   'reminders.create': 'reminders',
   'reminders.whatsapp': 'reminders',

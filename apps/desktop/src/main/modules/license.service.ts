@@ -1,50 +1,58 @@
-import { channelFeatures, writeChannels, type Channel, type LicenseState, type PlanItem } from '@gestion/contracts';
-import { canOperate, licenseStatus, verifyLicense, type LicensePayload, type PlanFeature } from '@gestion/license';
+import { channelFeatures, writeChannels, type Channel, type LicenseState } from '@gestion/contracts';
+import { canOperate, coversVersion, encodeOfflineRequest, licenseStatus, signMessage, verifyLicense, type LicensePayload, type PlanFeature } from '@gestion/license';
 import { AppError } from '../core/errors';
-import type { Context } from './commerce.shared';
+import type { DeviceIdentity } from '../services/deviceIdentity';
 
-const TOKEN_KEY = 'license.token';
-const SECRET_KEY = 'license.deviceSecret';
-const SEEN_KEY = 'license.lastSeen';
 const TIMEOUT_MS = 15_000;
+const NOT_CONFIGURED = 'Le serveur des licences n’est pas configuré dans cette version. Utilisez l’activation hors ligne.';
 
-const NOT_CONFIGURED = 'Le serveur des abonnements n’est pas configuré dans cette version.';
+interface Stored {
+  token: string | null;
+  /** Heure la plus tardive vue, utile seulement pour la fin d'un essai. */
+  lastSeen: string | null;
+}
 
-export function createLicenseService(options: Context & { apiUrl: string | null; publicKey: string | null; deviceName: string; testToken?: string | null; now?: () => Date }) {
-  const { db, deviceId, apiUrl, publicKey } = options;
+export function createLicenseService(options: {
+  store: { read(): string | null; write(value: string): void };
+  identity: DeviceIdentity;
+  apiUrl: string | null;
+  publicKey: string | null;
+  deviceName: string;
+  appVersion: string;
+  testToken?: string | null;
+  now?: () => Date;
+}) {
+  const { store, identity, apiUrl, publicKey, deviceName, appVersion } = options;
   const now = options.now ?? (() => new Date());
-  let token: string | null = options.testToken ?? null;
-  let lastSeen: Date | null = null;
-  let loaded = false;
-  const configured = Boolean(apiUrl && publicKey);
+  let state: Stored = { token: null, lastSeen: null };
   const writes = new Set<string>(writeChannels);
 
-  const read = async (key: string) => (await db.setting.findUnique({ where: { key } }))?.value ?? null;
-  const write = (key: string, value: string) => db.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  const decode = (token: string | null) => (token && publicKey ? verifyLicense(token, publicKey) : null);
 
   const payload = (): LicensePayload | null => {
-    if (!token || !publicKey) return null;
-    const verified = verifyLicense(token, publicKey);
+    if (options.testToken) return decode(options.testToken);
+    const verified = decode(state.token);
     // Un jeton copié depuis un autre poste ne vaut rien ici.
-    return verified && (options.testToken || verified.deviceId === deviceId) ? verified : null;
+    return verified?.deviceFingerprint === identity.fingerprint ? verified : null;
   };
 
-  async function load() {
-    if (loaded) return;
-    token ??= await read(TOKEN_KEY);
-    const seen = await read(SEEN_KEY);
-    lastSeen = seen ? new Date(seen) : null;
-    loaded = true;
+  function load() {
+    try {
+      state = { ...state, ...(JSON.parse(store.read() ?? '{}') as Partial<Stored>) };
+    } catch {
+      // Fichier illisible : la licence est absente, jamais valide, et les données restent intactes.
+    }
   }
 
-  const status = () => licenseStatus(payload(), now(), lastSeen);
+  const save = () => store.write(JSON.stringify(state));
+  const status = () => licenseStatus(payload(), now(), state.lastSeen ? new Date(state.lastSeen) : null);
 
-  /** Mémorise l'heure la plus tardive vue : reculer l'horloge est alors détectable. */
-  async function touch() {
+  function touchTrial() {
+    if (!payload()?.isTrial) return;
     const current = now();
-    if (!lastSeen || current > lastSeen) {
-      lastSeen = current;
-      await write(SEEN_KEY, current.toISOString());
+    if (!state.lastSeen || current > new Date(state.lastSeen)) {
+      state.lastSeen = current.toISOString();
+      save();
     }
   }
 
@@ -52,28 +60,37 @@ export function createLicenseService(options: Context & { apiUrl: string | null;
     const license = payload();
     const current = status();
     return {
-      configured,
+      configured: Boolean(publicKey),
+      online: Boolean(apiUrl),
       status: current,
       canOperate: canOperate(current),
-      planCode: license?.planCode ?? null,
+      editionName: license?.editionName ?? null,
       isTrial: license?.isTrial ?? false,
-      expiresAt: license?.expiresAt ?? null,
-      graceUntil: license?.graceUntil ?? null,
+      trialEndsAt: license?.trialEndsAt ?? null,
       features: license?.features ?? [],
       maxUsers: license?.maxUsers ?? null,
+      maxMajorVersion: license?.maxMajorVersion ?? null,
     };
   }
 
-  async function request<T>(path: string, init: { method?: string; body?: unknown; device?: boolean } = {}): Promise<T> {
-    if (!apiUrl) throw new AppError('INTERNAL', NOT_CONFIGURED);
-    const headers: Record<string, string> = {};
-    if (init.body !== undefined) headers['content-type'] = 'application/json';
-    if (init.device) {
-      const secret = await read(SECRET_KEY);
-      if (!secret) throw new AppError('CONFLICT', "Ce poste n'est pas encore activé.");
-      headers['x-device-id'] = deviceId;
-      headers['x-device-secret'] = secret;
+  /** Seule porte d'entrée d'un nouveau statut : un jeton signé, destiné à ce poste, et pas plus ancien que l'actuel. */
+  function accept(next: string): LicenseState {
+    const verified = decode(next);
+    if (!verified) throw new AppError('FORBIDDEN', 'La licence reçue est invalide.');
+    if (verified.deviceFingerprint !== identity.fingerprint) throw new AppError('CONFLICT', 'Cette licence a été générée pour un autre ordinateur.');
+    const current = decode(state.token);
+    if (current && current.deviceFingerprint === identity.fingerprint && Date.parse(verified.issuedAt) < Date.parse(current.issuedAt)) {
+      throw new AppError('CONFLICT', 'Cette licence est plus ancienne que celle déjà enregistrée sur ce poste.');
     }
+    state.token = next.trim();
+    save();
+    return view();
+  }
+
+  async function request<T>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
+    if (!apiUrl) throw new AppError('INTERNAL', NOT_CONFIGURED);
+    const headers: Record<string, string> = { ...init.headers };
+    if (init.body !== undefined) headers['content-type'] = 'application/json';
     let response: Response;
     try {
       response = await fetch(`${apiUrl}${path}`, {
@@ -86,106 +103,102 @@ export function createLicenseService(options: Context & { apiUrl: string | null;
       throw new AppError('INTERNAL', 'Connexion au serveur impossible. Vérifiez votre accès à Internet.');
     }
     const body = (await response.json().catch(() => ({}))) as { error?: string } & T;
-    if (!response.ok) throw new AppError(response.status === 401 ? 'FORBIDDEN' : 'CONFLICT', body.error ?? 'Le serveur a refusé la demande.');
+    if (!response.ok) throw new AppError(response.status === 401 || response.status === 403 ? 'FORBIDDEN' : 'CONFLICT', body.error ?? 'Le serveur a refusé la demande.');
     return body;
   }
 
-  async function store(next: string, secret?: string) {
-    if (!publicKey || !verifyLicense(next, publicKey)) throw new AppError('FORBIDDEN', 'La licence reçue est invalide.');
-    token = next;
-    await write(TOKEN_KEY, next);
-    if (secret) await write(SECRET_KEY, secret);
-    await touch();
+  const challenge = async () => (await request<{ challenge: string }>('/v1/challenge', { body: {} })).challenge;
+
+  /** Chaque requête prouve la clé privée du poste, sans dépendre de son horloge. */
+  async function signed<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const activationId = payload()?.activationId;
+    if (!activationId || options.testToken) throw new AppError('CONFLICT', "Ce poste n'est pas encore activé.");
+    const nonce = await challenge();
+    return request<T>(path, {
+      ...init,
+      headers: { 'x-activation-id': activationId, 'x-challenge': nonce, 'x-signature': signMessage(`${nonce}\n${init.method ?? 'POST'}\n${path}`, identity.privateKeyPem) },
+    });
   }
 
   return {
-    /** À attendre avant d'accepter la moindre requête : sinon le contrôle verrait une licence absente. */
     load,
 
     async state(): Promise<LicenseState> {
-      await load();
-      await touch();
+      touchTrial();
       return view();
     },
 
-    /** Appelé avant chaque opération : le blocage ne dépend pas de l'interface. */
+    /** Appelé avant chaque opération : le blocage ne dépend pas de l'interface, ni jamais du réseau. */
     guard(channel: Channel) {
       const current = status();
       const license = payload();
       const operating = canOperate(current);
       if (writes.has(channel) && !operating) {
-        throw new AppError('FORBIDDEN', 'Votre abonnement ne permet plus cette opération. Vos données restent consultables et exportables.');
+        throw new AppError('FORBIDDEN', 'Votre licence ne permet pas cette opération. Vos données restent consultables et exportables.');
       }
       const feature = channelFeatures[channel];
       if (feature && operating && !license?.features.includes(feature)) {
-        throw new AppError('FORBIDDEN', 'Cette fonction n’est pas incluse dans votre formule.');
+        throw new AppError('FORBIDDEN', 'Cette fonction n’est pas incluse dans votre édition.');
       }
     },
 
     requireFeature(feature: PlanFeature) {
-      if (!payload()?.features.includes(feature)) throw new AppError('FORBIDDEN', 'Cette fonction n’est pas incluse dans votre formule.');
+      if (!payload()?.features.includes(feature)) throw new AppError('FORBIDDEN', 'Cette fonction n’est pas incluse dans votre édition.');
     },
 
     hasFeature: (feature: PlanFeature) => payload()?.features.includes(feature) ?? false,
 
     limits: () => ({ maxUsers: payload()?.maxUsers ?? null, maxStores: payload()?.maxStores ?? null }),
 
-    async plans(): Promise<PlanItem[]> {
-      return request<PlanItem[]>('/v1/plans', { method: 'GET' });
-    },
+    /** Droit aux versions, distinct de la validité : une version non couverte ne change rien à la licence. */
+    coversApp: () => coversVersion(payload(), appVersion),
+    covers: (version: string) => coversVersion(payload(), version),
+    maxMajorVersion: () => payload()?.maxMajorVersion ?? null,
 
-    async signup(email: string, password: string, companyName: string): Promise<LicenseState> {
-      await load();
-      const result = await request<{ token: string; deviceSecret: string }>('/v1/signup', {
-        body: { email, password, companyName, phone: null, deviceId, deviceName: options.deviceName },
+    async activate(licenseKey: string): Promise<LicenseState> {
+      const key = licenseKey.trim().toUpperCase();
+      const nonce = await challenge();
+      const result = await request<{ token: string }>('/v1/activate', {
+        body: { licenseKey: key, devicePublicKey: identity.publicKeyPem, deviceName, appVersion, challenge: nonce, signature: signMessage(`activate\n${nonce}\n${key}`, identity.privateKeyPem) },
       });
-      await store(result.token, result.deviceSecret);
-      return view();
+      return accept(result.token);
     },
 
-    async activate(email: string, password: string): Promise<LicenseState> {
-      await load();
-      const result = await request<{ token: string; deviceSecret: string }>('/v1/activate', {
-        body: { email, password, deviceId, deviceName: options.deviceName },
-      });
-      await store(result.token, result.deviceSecret);
-      return view();
-    },
-
+    /** Une panne réseau ou un refus laisse la licence telle quelle. */
     async refresh(): Promise<LicenseState> {
-      await load();
-      if (!options.testToken && configured && (await read(SECRET_KEY))) {
-        const result = await request<{ token: string }>('/v1/license/refresh', { body: {}, device: true });
-        await store(result.token);
+      if (apiUrl && payload() && !options.testToken) {
+        const result = await signed<{ token: string }>('/v1/activation/status', { body: {} });
+        accept(result.token);
       }
-      await touch();
+      touchTrial();
       return view();
     },
 
-    /** Null tant que ce poste n'est pas activé : la synchronisation attend alors sans rien perdre. */
+    async transfer(): Promise<LicenseState> {
+      const result = await signed<{ token: string }>('/v1/activation/transfer', { body: {} });
+      return accept(result.token);
+    },
+
+    offlineRequest(licenseKey: string): string {
+      return encodeOfflineRequest({ licenseKey: licenseKey.trim().toUpperCase(), devicePublicKey: identity.publicKeyPem, deviceName, appVersion, createdAt: now().toISOString() }, identity.privateKeyPem);
+    },
+
+    importToken: (token: string) => accept(token),
+
+    /** Null sans édition incluant la synchronisation : elle attend alors sans rien perdre. */
     syncTransport() {
-      if (!configured) return null;
+      if (!apiUrl || !payload()?.features.includes('sync')) return null;
       return {
         push: async (events: { id: string; ciphertext: string }[]) => {
-          await request('/v1/sync/push', { body: { events }, device: true });
+          await signed('/v1/sync/push', { body: { events } });
         },
         pull: (after: string) =>
-          request<{ events: { id: string; ciphertext: string }[]; cursor: string; hasMore: boolean }>(`/v1/sync/pull?after=${encodeURIComponent(after)}`, { method: 'GET', device: true }),
+          signed<{ events: { id: string; ciphertext: string }[]; cursor: string; hasMore: boolean }>(`/v1/sync/pull?after=${encodeURIComponent(after)}`, { method: 'GET' }),
       };
     },
 
     latestRelease() {
       return request<{ version: string; url: string; notes: string } | null>('/v1/releases/latest', { method: 'GET' });
-    },
-
-    pay(planCode: string, months: number) {
-      return request<{ intentId: string; payUrl: string }>('/v1/payments', { body: { planCode, months }, device: true });
-    },
-
-    async paymentStatus(intentId: string) {
-      const result = await request<{ status: string; token: string }>(`/v1/payments/${encodeURIComponent(intentId)}`, { method: 'GET', device: true });
-      await store(result.token);
-      return { status: result.status };
     },
   };
 }

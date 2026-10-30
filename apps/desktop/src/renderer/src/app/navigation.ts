@@ -1,5 +1,5 @@
 import type { Permission } from '@gestion/domain';
-import { Activity, BarChart3, Boxes, CreditCard, BellRing, DatabaseBackup, RefreshCw, HandCoins, LayoutDashboard, Package, ReceiptText, ScrollText, Settings, ShoppingCart, UserCog, Users, Vault, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Boxes, KeyRound, BellRing, DatabaseBackup, RefreshCw, HandCoins, LayoutDashboard, Package, ReceiptText, ScrollText, Settings, ShoppingCart, UserCog, Users, Vault, Wallet, type LucideIcon } from 'lucide-react';
 
 export interface NavItem {
   path: string;
@@ -27,8 +27,8 @@ export const navigation: NavItem[] = [
   { path: '/employes', label: 'Employés', icon: UserCog, permission: 'manage_users' },
   { path: '/journal', label: "Journal d'activité", icon: ScrollText, permission: 'view_audit' },
   { path: '/sauvegardes', label: 'Sauvegardes', icon: DatabaseBackup, permission: 'manage_settings' },
-  { path: '/synchronisation', label: 'Synchronisation', icon: RefreshCw, permission: 'manage_settings' },
-  { path: '/abonnement', label: 'Abonnement', icon: CreditCard, permission: 'manage_settings' },
+  { path: '/synchronisation', label: 'Synchronisation', icon: RefreshCw, permission: 'manage_settings', feature: 'sync' },
+  { path: '/licence', label: 'Licence', icon: KeyRound, permission: 'manage_settings' },
   { path: '/systeme', label: 'État du système', icon: Activity },
   { path: '/parametres', label: 'Paramètres', icon: Settings },
 ];
