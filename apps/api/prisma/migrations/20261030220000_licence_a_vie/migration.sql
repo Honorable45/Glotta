@@ -1,5 +1,5 @@
 -- Passage à la licence à vie : aucune donnée de production n'existait avec le modèle abonnement.
-DROP TABLE "SubscriptionEvent", "Subscription", "PaymentIntent", "SupportTicket", "TenantDevice", "Tenant", "Plan", "PlatformSetting", "SyncEnvelope";
+TRUNCATE "SupportTicket", "SyncEnvelope", "PlatformSetting";
 
 -- DropForeignKey
 ALTER TABLE "TenantDevice" DROP CONSTRAINT "TenantDevice_tenantId_fkey";
@@ -222,3 +222,16 @@ ALTER TABLE "Sale" ADD CONSTRAINT "Sale_licenseId_fkey" FOREIGN KEY ("licenseId"
 -- AddForeignKey
 ALTER TABLE "SupportTicket" ADD CONSTRAINT "SupportTicket_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
+
+-- Historiques en ajout seul : ni modification ni suppression, même depuis l'application.
+CREATE FUNCTION forbid_change() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'Historique en ajout seul';
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER "LicenseEvent_append_only" BEFORE UPDATE OR DELETE ON "LicenseEvent" FOR EACH ROW EXECUTE FUNCTION forbid_change();
+CREATE TRIGGER "AdminAuditLog_append_only" BEFORE UPDATE OR DELETE ON "AdminAuditLog" FOR EACH ROW EXECUTE FUNCTION forbid_change();
+
+INSERT INTO "PlatformSetting" ("key", "value") VALUES ('trialDays', '14');
+-- Les administrateurs créés avant les rôles restent propriétaires de la plateforme.
+UPDATE "PlatformAdmin" SET "role" = 'OWNER';

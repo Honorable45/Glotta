@@ -1,222 +1,435 @@
-import { generateLicenseKeys, verifyLicense } from '@gestion/license';
+import { decodeOfflineRequest, encodeOfflineRequest, generateDeviceKeys, generateLicenseKeys, hashPassword, signMessage, verifyLicense } from '@gestion/license';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { v7 as newId } from 'uuid';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { hashPassword } from '@gestion/license';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from './app';
 import { PrismaClient } from './generated/client';
-import type { PaymentProvider } from './providers';
 import { newTotpSecret, totpCode } from './totp';
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: 'postgresql://postgres:test@127.0.0.1:55432/gestion_test' }) });
 const keys = generateLicenseKeys();
-let remote: { status: 'CONFIRMED' | 'PENDING' | 'FAILED'; amount: number | null; providerRef: string | null };
-let statusCalls = 0;
-/** Doublure de test : le code de production n'enregistre aucun prestataire factice. */
-const testProvider: PaymentProvider = {
-  name: 'test',
-  createPayment: async ({ intentId }) => ({ payUrl: `https://pay.test/${intentId}`, providerRef: 'ref' }),
-  intentIdFromWebhook: (body) => (body as { id?: string }).id ?? null,
-  fetchStatus: async () => { statusCalls += 1; return remote; },
-};
 let app: Awaited<ReturnType<typeof buildApp>>;
-let adminToken: string;
-const device = () => ({ deviceId: newId(), deviceName: 'Poste 1' });
-const account = () => ({ email: `${newId()}@test.tg`, password: 'motdepasse1', ...device(), companyName: 'Boutique', phone: null });
+let ownerToken: string;
+let staffToken: string;
 
-async function post(url: string, payload: object, headers: Record<string, string> = {}) {
-  return app.inject({ method: 'POST', url, payload, headers });
-}
-async function signup() {
-  const input = account();
-  const response = await post('/v1/signup', input);
-  expect(response.statusCode).toBe(200);
-  const body = response.json<{ deviceSecret: string; token: string }>();
-  return { ...input, ...body, headers: { 'x-device-id': input.deviceId, 'x-device-secret': body.deviceSecret } };
-}
+const owner = () => ({ authorization: `Bearer ${ownerToken}` });
+const staff = () => ({ authorization: `Bearer ${staffToken}` });
+const post = (url: string, payload: object, headers: Record<string, string> = {}) => app.inject({ method: 'POST', url, payload, headers });
 const decode = (token: string) => verifyLicense(token, keys.publicKeyPem)!;
-const admin = () => ({ authorization: `Bearer ${adminToken}` });
 
-beforeAll(async () => {
-  app = await buildApp({ db, licensePrivateKey: keys.privateKeyPem, providers: { test: testProvider }, defaultProvider: 'test', rateLimitMax: 100_000 });
+async function adminLogin(role: string) {
   const secret = newTotpSecret();
   const email = `${newId()}@admin.tg`;
-  await db.platformAdmin.create({ data: { id: newId(), email, passwordHash: await hashPassword('administrateur1'), totpSecret: secret } });
+  await db.platformAdmin.create({ data: { id: newId(), email, role, passwordHash: await hashPassword('administrateur1'), totpSecret: secret } });
   const login = await post('/admin/login', { email, password: 'administrateur1', totp: totpCode(secret) });
-  adminToken = login.json<{ token: string }>().token;
-  const refused = await post('/admin/login', { email, password: 'administrateur1', totp: '000000' });
-  expect(refused.statusCode).toBe(401);
+  expect(login.statusCode).toBe(200);
+  expect((await post('/admin/login', { email, password: 'administrateur1', totp: '000000' })).statusCode).toBe(401);
+  return login.json<{ token: string }>().token;
+}
+
+const edition = async (changes: object = {}) => {
+  const code = `E${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const response = await post('/admin/editions', { code, name: `Édition ${code}`, description: '', price: 150000, maxUsers: 5, maxStores: 1, maxDevices: 1, features: ['cash'], majorVersion: 1, syncQuotaMb: 0, isActive: true, ...changes }, owner());
+  expect(response.statusCode).toBe(200);
+  return code;
+};
+const customer = async () => (await post('/admin/customers', { name: 'Boutique Afi', contactName: null, email: null, phone: '+228 90 00 00 00', address: null, notes: null }, staff())).json<{ id: string }>().id;
+
+async function sale(changes: object = {}, editionChanges: object = {}) {
+  const customerId = await customer();
+  const editionCode = await edition(editionChanges);
+  const response = await post('/admin/sales', { customerId, editionCode, ...changes }, staff());
+  expect(response.statusCode).toBe(200);
+  return { customerId, editionCode, sale: response.json<{ id: string; licenseId: string; amount: number; status: string }>() };
+}
+const confirm = (id: string) => post(`/admin/sales/${id}/confirm`, { paymentMethod: 'Mobile Money', paymentReference: 'TX1' }, staff());
+const revealKey = async (licenseId: string) => (await post(`/admin/licenses/${licenseId}/reveal-key`, {}, staff())).json<{ key: string }>().key;
+async function paidLicense(editionChanges: object = {}) {
+  const made = await sale({}, editionChanges);
+  expect((await confirm(made.sale.id)).statusCode).toBe(200);
+  return { ...made, licenseId: made.sale.licenseId, key: await revealKey(made.sale.licenseId) };
+}
+
+class Device {
+  keys = generateDeviceKeys();
+  activationId = '';
+  token = '';
+  async challenge() {
+    return (await post('/v1/challenge', {})).json<{ challenge: string }>().challenge;
+  }
+  async activate(licenseKey: string) {
+    const challenge = await this.challenge();
+    const response = await post('/v1/activate', { licenseKey, devicePublicKey: this.keys.publicKeyPem, deviceName: 'Poste', appVersion: '1.0.0', challenge, signature: signMessage(`activate\n${challenge}\n${licenseKey}`, this.keys.privateKeyPem) });
+    if (response.statusCode === 200) {
+      this.token = response.json<{ token: string }>().token;
+      this.activationId = decode(this.token).activationId;
+    }
+    return response;
+  }
+  async auth(method: string, url: string) {
+    const challenge = await this.challenge();
+    return { 'x-activation-id': this.activationId, 'x-challenge': challenge, 'x-signature': signMessage(`${challenge}\n${method}\n${url}`, this.keys.privateKeyPem) };
+  }
+  async status() {
+    return decode((await post('/v1/activation/status', {}, await this.auth('POST', '/v1/activation/status'))).json<{ token: string }>().token);
+  }
+}
+
+beforeAll(async () => {
+  app = await buildApp({ db, licensePrivateKey: keys.privateKeyPem, rateLimitMax: 100_000 });
+  ownerToken = await adminLogin('OWNER');
+  staffToken = await adminLogin('ADMIN');
 });
 afterAll(async () => { await app.close(); await db.$disconnect(); });
-beforeEach(() => { statusCalls = 0; remote = { status: 'CONFIRMED', amount: 5000, providerRef: 'ref' }; });
 
-describe('inscription et licence', () => {
-  it('propose les trois formules aux prix prévus', async () => {
-    const plans = (await app.inject({ url: '/v1/plans' })).json<{ code: string; price: number; maxUsers: number }[]>();
-    expect(plans.map((plan) => [plan.code, plan.price, plan.maxUsers])).toEqual([['STARTER', 2500, 1], ['PRO', 5000, 5], ['BUSINESS', 10000, 15]]);
+describe('vente et délivrance', () => {
+  it('ne délivre rien avant la confirmation réelle du paiement', async () => {
+    const { sale: created } = await sale();
+    expect(created.status).toBe('PENDING');
+    expect(created.amount).toBe(150000);
+    const license = await db.license.findUniqueOrThrow({ where: { id: created.licenseId } });
+    expect(license.status).toBe('PENDING');
+    // La clé en attente n'est ni lisible ni utilisable.
+    expect((await post(`/admin/licenses/${license.id}/reveal-key`, {}, staff())).statusCode).toBe(409);
+    expect((await app.inject({ url: `/admin/sales/${created.id}/receipt`, headers: staff() })).statusCode).toBe(409);
+    expect((await confirm(created.id)).statusCode).toBe(200);
+    expect((await db.license.findUniqueOrThrow({ where: { id: license.id } })).status).toBe('ACTIVE');
   });
 
-  it('démarre un essai et émet une licence signée', async () => {
-    const { token, deviceId } = await signup();
-    const license = decode(token);
-    expect([license.isTrial, license.deviceId, license.planCode]).toEqual([true, deviceId, 'PRO']);
-    expect(Date.parse(license.offlineUntil)).toBeGreaterThan(Date.now());
-    expect(verifyLicense(token, generateLicenseKeys().publicKeyPem)).toBeNull();
+  it('refuse d’activer une licence en attente', async () => {
+    const { sale: created } = await sale();
+    const licenseKey = `GC-${created.id.slice(-12)}`;
+    // La clé réelle n'est jamais exposée : on vérifie via la base de test.
+    const { hashLicenseKey } = await import('./licenseKeys');
+    await db.license.update({ where: { id: created.licenseId }, data: { keyHash: hashLicenseKey(licenseKey) } });
+    expect((await new Device().activate(licenseKey)).statusCode).toBe(403);
   });
 
-  it('refuse un deuxième essai sur le même poste ou le même email', async () => {
-    const first = await signup();
-    expect((await post('/v1/signup', { ...account(), deviceId: first.deviceId })).statusCode).toBe(409);
-    expect((await post('/v1/signup', { ...account(), email: first.email })).statusCode).toBe(409);
+  it('confirme une seule fois, même en parallèle', async () => {
+    const { sale: created } = await sale();
+    const results = await Promise.all([1, 2, 3, 4].map(() => confirm(created.id)));
+    expect(results.filter((result) => result.statusCode === 200)).toHaveLength(1);
+    expect(await db.licenseEvent.count({ where: { licenseId: created.licenseId, type: 'license.issue' } })).toBe(1);
   });
 
-  it('refuse un mauvais mot de passe sans préciser la cause', async () => {
-    const first = await signup();
-    const wrong = await post('/v1/activate', { email: first.email, password: 'mauvais-pass', ...device() });
-    const unknown = await post('/v1/activate', { email: 'inconnu@test.tg', password: 'mauvais-pass', ...device() });
-    expect(wrong.statusCode).toBe(401);
-    expect(wrong.json()).toEqual(unknown.json());
-    expect((await post('/v1/activate', { email: first.email, password: first.password, ...device() })).statusCode).toBe(200);
+  it('le prix vient de l’édition, modifiable, sans affecter les licences déjà vendues', async () => {
+    const { key, licenseId, editionCode } = await paidLicense({ maxUsers: 5 });
+    await app.inject({ method: 'PUT', url: `/admin/editions/${editionCode}`, headers: owner(), payload: { name: 'Nouveau', description: '', price: 999, maxUsers: 1, maxStores: 1, maxDevices: 1, features: [], majorVersion: 1, syncQuotaMb: 0, isActive: true } });
+    const device = new Device();
+    await device.activate(key);
+    expect(decode(device.token).maxUsers).toBe(5);
+    expect(decode(device.token).features).toEqual(['cash']);
+    const customerId = (await db.license.findUniqueOrThrow({ where: { id: licenseId } })).customerId;
+    const second = await post('/admin/sales', { customerId, editionCode }, staff());
+    expect(second.json<{ amount: number }>().amount).toBe(999);
   });
 
-  it('rafraîchit seulement avec le secret du poste', async () => {
-    const first = await signup();
-    expect((await post('/v1/license/refresh', {}, first.headers)).statusCode).toBe(200);
-    expect((await post('/v1/license/refresh', {}, { ...first.headers, 'x-device-secret': 'faux' })).statusCode).toBe(401);
-    expect((await post('/v1/license/refresh', {})).statusCode).toBe(401);
+  it('annule une vente en attente sans jamais délivrer', async () => {
+    const { sale: created } = await sale();
+    expect((await post(`/admin/sales/${created.id}/cancel`, { reason: '' }, staff())).statusCode).toBe(400);
+    expect((await post(`/admin/sales/${created.id}/cancel`, { reason: 'Client désisté' }, staff())).statusCode).toBe(200);
+    expect((await confirm(created.id)).statusCode).toBe(409);
+    expect((await db.license.findUniqueOrThrow({ where: { id: created.licenseId } })).status).toBe('REVOKED');
+  });
+
+  it('rembourser révoque la licence, et le poste l’apprend par réponse signée', async () => {
+    const { key, sale: created } = await paidLicense();
+    const device = new Device();
+    await device.activate(key);
+    expect((await post(`/admin/sales/${created.id}/refund`, { reason: 'Erreur de commande' }, staff())).statusCode).toBe(403);
+    expect((await post(`/admin/sales/${created.id}/refund`, { reason: 'Erreur de commande' }, owner())).statusCode).toBe(200);
+    expect((await device.status()).status).toBe('REVOKED');
+  });
+
+  it('produit un reçu PDF réel après paiement', async () => {
+    await app.inject({ method: 'PUT', url: '/admin/settings', headers: owner(), payload: { trialDays: 14, vendorName: 'Vendeur', vendorAddress: 'Lomé', vendorPhone: '', vendorEmail: '' } });
+    const { sale: created } = await paidLicense();
+    const receipt = await app.inject({ url: `/admin/sales/${created.id}/receipt`, headers: staff() });
+    expect(receipt.statusCode).toBe(200);
+    expect(receipt.headers['content-type']).toBe('application/pdf');
+    expect(receipt.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(receipt.headers['content-disposition']).toMatch(/R-\d{6}\.pdf/);
   });
 });
 
-describe('paiements', () => {
-  async function pay() {
-    const account = await signup();
-    const created = await post('/v1/payments', { planCode: 'PRO', months: 1 }, account.headers);
-    expect(created.statusCode).toBe(200);
-    return { ...account, intentId: created.json<{ intentId: string }>().intentId };
-  }
-  const subscription = (token: string) => db.subscription.findUniqueOrThrow({ where: { tenantId: decode(token).tenantId } });
-
-  it('une notification seule ne valide rien : le statut du prestataire décide', async () => {
-    const { intentId, token } = await pay();
-    remote = { status: 'PENDING', amount: null, providerRef: null };
-    await post('/v1/payments/webhook/test', { id: intentId, status: 'SUCCESS' });
-    expect((await db.paymentIntent.findUniqueOrThrow({ where: { id: intentId } })).status).toBe('PENDING');
-    expect((await subscription(token)).isTrial).toBe(true);
+describe('activation', () => {
+  it('émet un jeton signé lié au poste, sans date d’expiration', async () => {
+    const { key } = await paidLicense();
+    const device = new Device();
+    expect((await device.activate(key)).statusCode).toBe(200);
+    const token = decode(device.token);
+    expect(token.status).toBe('ACTIVE');
+    expect(token.isTrial).toBe(false);
+    expect(token.trialEndsAt).toBeNull();
+    expect(token).not.toHaveProperty('expiresAt');
   });
 
-  it('confirme une seule fois, même notifié plusieurs fois en même temps', async () => {
-    const { intentId, token } = await pay();
-    const before = await subscription(token);
-    await Promise.all([1, 2, 3, 4].map(() => post('/v1/payments/webhook/test', { id: intentId })));
-    const after = await subscription(token);
-    const added = (after.expiresAt.getTime() - before.expiresAt.getTime()) / 86_400_000;
-    expect(added).toBeGreaterThanOrEqual(28);
-    expect(added).toBeLessThanOrEqual(31);
-    expect(after.isTrial).toBe(false);
-    expect(await db.subscriptionEvent.count({ where: { tenantId: after.tenantId, type: 'payment.confirmed' } })).toBe(1);
+  it('une licence = un ordinateur par défaut ; le même poste se réactive sans consommer de place', async () => {
+    const { key } = await paidLicense();
+    const first = new Device();
+    await first.activate(key);
+    expect((await first.activate(key)).statusCode).toBe(200);
+    const second = new Device();
+    const refused = await second.activate(key);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: string }>().error).toMatch(/1 ordinateur/);
   });
 
-  it('refuse un montant incohérent', async () => {
-    const { intentId } = await pay();
-    remote = { status: 'CONFIRMED', amount: 100, providerRef: 'ref' };
-    await post('/v1/payments/webhook/test', { id: intentId });
-    expect((await db.paymentIntent.findUniqueOrThrow({ where: { id: intentId } })).status).toBe('PENDING');
+  it('ne dépasse pas la limite même avec des activations simultanées', async () => {
+    const { key, licenseId } = await paidLicense({ maxDevices: 2 });
+    const results = await Promise.all([1, 2, 3, 4, 5].map(() => new Device().activate(key)));
+    expect(results.filter((result) => result.statusCode === 200)).toHaveLength(2);
+    expect(await db.activation.count({ where: { licenseId, releasedAt: null } })).toBe(2);
   });
 
-  it('un paiement échoué n’active rien, et le prix vient du serveur', async () => {
-    const { intentId, token } = await pay();
-    remote = { status: 'FAILED', amount: null, providerRef: null };
-    await post('/v1/payments/webhook/test', { id: intentId });
-    expect((await db.paymentIntent.findUniqueOrThrow({ where: { id: intentId } })).status).toBe('FAILED');
-    expect((await subscription(token)).isTrial).toBe(true);
-    expect((await db.paymentIntent.findUniqueOrThrow({ where: { id: intentId } })).amount).toBe(5000);
+  it('exige la preuve de la clé privée du poste et un défi valide', async () => {
+    const { key } = await paidLicense();
+    const device = new Device();
+    const challenge = await device.challenge();
+    const base = { licenseKey: key, devicePublicKey: device.keys.publicKeyPem, deviceName: 'P', appVersion: '1.0.0' };
+    expect((await post('/v1/activate', { ...base, challenge, signature: signMessage(`activate\n${challenge}\n${key}`, generateDeviceKeys().privateKeyPem) })).statusCode).toBe(401);
+    expect((await post('/v1/activate', { ...base, challenge: 'faux.defi.x', signature: signMessage(`activate\nfaux.defi.x\n${key}`, device.keys.privateKeyPem) })).statusCode).toBe(401);
   });
 
-  it('une entreprise ne lit pas le paiement d’une autre', async () => {
-    const { intentId } = await pay();
-    const other = await signup();
-    expect((await app.inject({ url: `/v1/payments/${intentId}`, headers: other.headers })).statusCode).toBe(404);
+  it('refuse un défi expiré', async () => {
+    let clock = new Date();
+    const dated = await buildApp({ db, licensePrivateKey: keys.privateKeyPem, rateLimitMax: 100_000, now: () => clock });
+    const { challenge } = (await dated.inject({ method: 'POST', url: '/v1/challenge' })).json<{ challenge: string }>();
+    clock = new Date(clock.getTime() + 6 * 60_000);
+    const device = new Device();
+    const response = await dated.inject({ method: 'POST', url: '/v1/activate', payload: { licenseKey: 'GC-AAAAA-AAAAA', devicePublicKey: device.keys.publicKeyPem, deviceName: 'P', appVersion: '1', challenge, signature: signMessage(`activate\n${challenge}\nGC-AAAAA-AAAAA`, device.keys.privateKeyPem) } });
+    expect(response.statusCode).toBe(401);
+    await dated.close();
   });
 
-  it('sans prestataire configuré, le paiement est refusé clairement', async () => {
-    const bare = await buildApp({ db, licensePrivateKey: keys.privateKeyPem, providers: {}, defaultProvider: null, rateLimitMax: 100_000 });
-    const { headers } = await signup();
-    const response = await bare.inject({ method: 'POST', url: '/v1/payments', payload: { planCode: 'PRO', months: 1 }, headers });
-    expect(response.statusCode).toBe(503);
-    await bare.close();
+  it('refuse une clé inconnue', async () => {
+    expect((await new Device().activate('GC-ZZZZZ-ZZZZZ-ZZZZZ-ZZZZZ')).statusCode).toBe(404);
+  });
+
+  it('hors ligne : demande signée, jeton signé, demande falsifiée refusée', async () => {
+    const { key } = await paidLicense();
+    const device = new Device();
+    const encoded = encodeOfflineRequest({ licenseKey: key, devicePublicKey: device.keys.publicKeyPem, deviceName: 'Sans réseau', appVersion: '1.0.0', createdAt: new Date().toISOString() }, device.keys.privateKeyPem);
+    expect(decodeOfflineRequest(encoded)?.licenseKey).toBe(key);
+    expect((await post('/admin/activations/offline', { request: `${encoded}x` }, staff())).statusCode).toBe(400);
+    expect((await post('/admin/activations/offline', { request: encoded })).statusCode).toBe(401);
+    const response = await post('/admin/activations/offline', { request: encoded }, staff());
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ token: string; fileName: string }>();
+    expect(body.fileName).toMatch(/\.gclicence$/);
+    expect(decode(body.token).status).toBe('ACTIVE');
+    expect(await db.activation.count({ where: { id: decode(body.token).activationId, method: 'OFFLINE' } })).toBe(1);
+  });
+});
+
+describe('statut et transfert', () => {
+  it('suspend et réactive avec un motif, révocation définitive', async () => {
+    const { key, licenseId } = await paidLicense();
+    const device = new Device();
+    await device.activate(key);
+    const url = `/admin/licenses/${licenseId}/status`;
+    expect((await post(url, { action: 'suspend', reason: '' }, staff())).statusCode).toBe(400);
+    expect((await post(url, { action: 'suspend', reason: 'Fraude constatée' }, staff())).statusCode).toBe(200);
+    expect((await device.status()).status).toBe('SUSPENDED');
+    expect((await post(url, { action: 'resume', reason: 'Régularisé' }, staff())).statusCode).toBe(200);
+    expect((await device.status()).status).toBe('ACTIVE');
+    expect((await post(url, { action: 'revoke', reason: 'Fraude confirmée' }, staff())).statusCode).toBe(200);
+    expect((await device.status()).status).toBe('REVOKED');
+    expect((await post(url, { action: 'resume', reason: 'Tentative' }, staff())).statusCode).toBe(409);
+    expect(await db.adminAuditLog.count({ where: { action: 'license.revoke' } })).toBeGreaterThan(0);
+  });
+
+  it('le statut exige la signature du poste', async () => {
+    const { key } = await paidLicense();
+    const device = new Device();
+    await device.activate(key);
+    const stranger = generateDeviceKeys();
+    const challenge = await device.challenge();
+    const forged = { 'x-activation-id': device.activationId, 'x-challenge': challenge, 'x-signature': signMessage(`${challenge}\nPOST\n/v1/activation/status`, stranger.privateKeyPem) };
+    expect((await post('/v1/activation/status', {}, forged)).statusCode).toBe(401);
+    expect((await post('/v1/activation/status', {})).statusCode).toBe(401);
+  });
+
+  it('transfert depuis le poste : place libérée, nouveau poste accepté, ancien jeton marqué libéré', async () => {
+    const { key } = await paidLicense();
+    const first = new Device();
+    await first.activate(key);
+    const response = await post('/v1/activation/transfer', {}, await first.auth('POST', '/v1/activation/transfer'));
+    expect(decode(response.json<{ token: string }>().token).status).toBe('RELEASED');
+    expect((await first.status()).status).toBe('RELEASED');
+    const second = new Device();
+    expect((await second.activate(key)).statusCode).toBe(200);
+    // Le premier poste ne peut plus reprendre la place occupée.
+    expect((await first.activate(key)).statusCode).toBe(409);
+  });
+
+  it('poste perdu : l’administrateur libère la place avec un motif', async () => {
+    const { key } = await paidLicense();
+    const lost = new Device();
+    await lost.activate(key);
+    const url = `/admin/activations/${lost.activationId}/release`;
+    expect((await post(url, { reason: '' }, staff())).statusCode).toBe(400);
+    expect((await post(url, { reason: 'Ordinateur volé' }, staff())).statusCode).toBe(200);
+    expect((await post(url, { reason: 'Ordinateur volé' }, staff())).statusCode).toBe(409);
+    expect((await new Device().activate(key)).statusCode).toBe(200);
+  });
+
+  it('mise à niveau : le droit de version augmente seulement après paiement', async () => {
+    const { key, licenseId, customerId } = await paidLicense();
+    const device = new Device();
+    await device.activate(key);
+    expect((await device.status()).maxMajorVersion).toBe(1);
+    const v2 = await edition({ majorVersion: 2, price: 50000 });
+    const upgrade = (await post('/admin/sales', { customerId, editionCode: v2, upgradeLicenseId: licenseId }, staff())).json<{ id: string; kind: string }>();
+    expect(upgrade.kind).toBe('UPGRADE');
+    expect((await device.status()).maxMajorVersion).toBe(1);
+    await confirm(upgrade.id);
+    expect((await device.status()).maxMajorVersion).toBe(2);
+    const v1 = await edition({ majorVersion: 1 });
+    expect((await post('/admin/sales', { customerId, editionCode: v1, upgradeLicenseId: licenseId }, staff())).statusCode).toBe(409);
+    await post(`/admin/sales/${upgrade.id}/refund`, { reason: 'Annulation' }, owner());
+    const after = await device.status();
+    expect(after.maxMajorVersion).toBe(1);
+    // Rembourser une mise à niveau ne retire pas la licence d'origine.
+    expect(after.status).toBe('ACTIVE');
+  });
+
+  it('essai : licence distincte, date signée, sans synchronisation', async () => {
+    const customerId = await customer();
+    const editionCode = await edition({ features: ['cash', 'sync'], maxDevices: 3, syncQuotaMb: 10 });
+    const trial = (await post('/admin/licenses/trial', { customerId, editionCode }, staff())).json<{ id: string }>();
+    const device = new Device();
+    await device.activate(await revealKey(trial.id));
+    const token = decode(device.token);
+    expect(token.isTrial).toBe(true);
+    const days = (Date.parse(token.trialEndsAt!) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(13.9);
+    expect(days).toBeLessThan(14.1);
+    expect(token.features).toEqual(['cash']);
+    expect(await db.sale.count({ where: { licenseId: trial.id } })).toBe(0);
+    expect((await new Device().activate(await revealKey(trial.id))).statusCode).toBe(409);
   });
 });
 
 describe('relais de synchronisation', () => {
-  it('relaie entre postes d’une même entreprise, sans doublon ni fuite vers une autre', async () => {
-    const first = await signup();
-    const secondDevice = device();
-    const activated = (await post('/v1/activate', { email: first.email, password: first.password, ...secondDevice })).json<{ deviceSecret: string }>();
-    const second = { 'x-device-id': secondDevice.deviceId, 'x-device-secret': activated.deviceSecret };
+  const syncEdition = { features: ['sync'], maxDevices: 2, syncQuotaMb: 1 };
+  const pull = async (device: Device, after = '0') => {
+    const url = `/v1/sync/pull?after=${after}`;
+    return (await app.inject({ url, headers: await device.auth('GET', url) })).json<{ events: { id: string }[]; cursor: string }>();
+  };
+  const push = async (device: Device, events: object[]) => post('/v1/sync/push', { events }, await device.auth('POST', '/v1/sync/push'));
+
+  it('relaie entre postes d’une même licence, sans doublon ni fuite vers une autre', async () => {
+    const { key } = await paidLicense(syncEdition);
+    const [first, second] = [new Device(), new Device()];
+    await first.activate(key);
+    await second.activate(key);
     const event = { id: newId(), ciphertext: 'contenu-chiffre' };
-    expect((await post('/v1/sync/push', { events: [event] }, first.headers)).statusCode).toBe(200);
-    expect((await post('/v1/sync/push', { events: [event] }, first.headers)).statusCode).toBe(200);
-    const pull = (headers: Record<string, string>, after = '0') => app.inject({ url: `/v1/sync/pull?after=${after}`, headers }).then((response) => response.json<{ events: { id: string }[]; cursor: string }>());
+    expect((await push(first, [event])).statusCode).toBe(200);
+    expect((await push(first, [event])).statusCode).toBe(200);
     const received = await pull(second);
     expect(received.events.map((item) => item.id)).toEqual([event.id]);
-    expect((await pull(first.headers)).events).toEqual([]);
+    expect((await pull(first)).events).toEqual([]);
     expect((await pull(second, received.cursor)).events).toEqual([]);
-    const stranger = await signup();
-    expect((await pull(stranger.headers)).events).toEqual([]);
+    const stranger = new Device();
+    await stranger.activate((await paidLicense(syncEdition)).key);
+    expect((await pull(stranger)).events).toEqual([]);
     expect((await app.inject({ url: '/v1/sync/pull?after=0' })).statusCode).toBe(401);
+  });
+
+  it('applique la limite de stockage, sans compter deux fois un renvoi', async () => {
+    const { key, licenseId } = await paidLicense(syncEdition);
+    const device = new Device();
+    await device.activate(key);
+    const event = { id: newId(), ciphertext: 'x'.repeat(600_000) };
+    await push(device, [event]);
+    await push(device, [event]);
+    expect((await db.license.findUniqueOrThrow({ where: { id: licenseId } })).syncBytes).toBe(600_000n);
+    expect((await push(device, [{ id: newId(), ciphertext: 'x'.repeat(600_000) }])).statusCode).toBe(413);
+  });
+
+  it('refuse une édition sans synchronisation et une licence suspendue', async () => {
+    const plain = new Device();
+    await plain.activate((await paidLicense()).key);
+    expect((await push(plain, [{ id: newId(), ciphertext: 'a' }])).statusCode).toBe(403);
+    const { key, licenseId } = await paidLicense(syncEdition);
+    const device = new Device();
+    await device.activate(key);
+    await post(`/admin/licenses/${licenseId}/status`, { action: 'suspend', reason: 'Test de suspension' }, staff());
+    expect((await push(device, [{ id: newId(), ciphertext: 'a' }])).statusCode).toBe(403);
   });
 });
 
-describe('administration', () => {
-  it('refuse tout accès sans session d’administrateur, y compris à un poste commerçant', async () => {
-    const shop = await signup();
-    for (const url of ['/admin/tenants', '/admin/stats', '/admin/plans', '/admin/payments', '/admin/tickets', '/admin/logs', '/admin/settings']) {
+describe('plateforme', () => {
+  const urls = ['/admin/dashboard', '/admin/customers', '/admin/editions', '/admin/sales', '/admin/licenses', '/admin/activations', '/admin/audit', '/admin/tickets', '/admin/logs', '/admin/settings'];
+
+  it('refuse tout accès sans session, y compris avec la signature d’un poste', async () => {
+    const device = new Device();
+    await device.activate((await paidLicense()).key);
+    for (const url of urls) {
       expect((await app.inject({ url })).statusCode).toBe(401);
-      expect((await app.inject({ url, headers: shop.headers })).statusCode).toBe(401);
-      expect((await app.inject({ url, headers: { authorization: `Bearer ${shop.deviceSecret}` } })).statusCode).toBe(401);
+      expect((await app.inject({ url, headers: await device.auth('GET', url) })).statusCode).toBe(401);
+      expect((await app.inject({ url, headers: { authorization: 'Bearer faux' } })).statusCode).toBe(401);
     }
   });
 
-  it('suspend et réactive, avec un motif obligatoire, et la licence le reflète', async () => {
-    const shop = await signup();
-    const { tenantId } = decode(shop.token);
-    const url = `/admin/tenants/${tenantId}/subscription`;
-    expect((await post(url, { action: 'suspend', reason: '' }, admin())).statusCode).toBe(400);
-    expect((await post(url, { action: 'suspend', reason: 'Fraude constatée' }, admin())).statusCode).toBe(200);
-    expect(decode((await post('/v1/license/refresh', {}, shop.headers)).json<{ token: string }>().token).suspended).toBe(true);
-    await post(url, { action: 'resume', reason: 'Régularisé' }, admin());
-    expect(decode((await post('/v1/license/refresh', {}, shop.headers)).json<{ token: string }>().token).suspended).toBe(false);
-    expect(await db.adminAuditLog.count({ where: { action: 'subscription.suspend' } })).toBeGreaterThan(0);
+  it('réserve éditions, remboursements et comptes au propriétaire', async () => {
+    expect((await post('/admin/editions', { code: 'INTERDIT', name: 'x', description: '', price: 1, maxUsers: 1, maxStores: 1, maxDevices: 1, features: [], majorVersion: 1, syncQuotaMb: 0, isActive: true }, staff())).statusCode).toBe(403);
+    expect((await app.inject({ url: '/admin/admins', headers: staff() })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PUT', url: '/admin/settings', headers: staff(), payload: { trialDays: 1, vendorName: '', vendorAddress: '', vendorPhone: '', vendorEmail: '' } })).statusCode).toBe(403);
   });
 
-  it('modifie prix, limites et durées, qui s’appliquent aux nouvelles licences', async () => {
-    const edited = await app.inject({ method: 'PUT', url: '/admin/plans/PRO', headers: admin(), payload: { name: 'PRO', price: 5000, maxUsers: 7, maxStores: 1, isActive: true } });
-    expect(edited.statusCode).toBe(200);
-    const shop = await signup();
-    expect(decode(shop.token).maxUsers).toBe(7);
-    await app.inject({ method: 'PUT', url: '/admin/plans/PRO', headers: admin(), payload: { name: 'PRO', price: 5000, maxUsers: 5, maxStores: 1, isActive: true } });
-    await app.inject({ method: 'PUT', url: '/admin/settings', headers: admin(), payload: { trialDays: 1, graceDays: 3, offlineDays: 7 } });
-    const short = await signup();
-    const days = (Date.parse(decode(short.token).expiresAt) - Date.now()) / 86_400_000;
-    expect(days).toBeLessThan(1.01);
-    await app.inject({ method: 'PUT', url: '/admin/settings', headers: admin(), payload: { trialDays: 14, graceDays: 3, offlineDays: 7 } });
+  it('un compte désactivé perd aussitôt sa session', async () => {
+    const created = await post('/admin/admins', { email: `${newId()}@admin.tg`, name: 'Temp', role: 'ADMIN', password: 'motdepasseadmin' }, owner());
+    const { id, totpSecret } = created.json<{ id: string; totpSecret: string }>();
+    const { email } = await db.platformAdmin.findUniqueOrThrow({ where: { id } });
+    const session = (await post('/admin/login', { email, password: 'motdepasseadmin', totp: totpCode(totpSecret) })).json<{ token: string }>().token;
+    expect((await app.inject({ url: '/admin/dashboard', headers: { authorization: `Bearer ${session}` } })).statusCode).toBe(200);
+    await post(`/admin/admins/${id}/disabled`, { disabled: true }, owner());
+    expect((await app.inject({ url: '/admin/dashboard', headers: { authorization: `Bearer ${session}` } })).statusCode).toBe(401);
   });
 
-  it('ne stocke aucun mot de passe ni donnée commerciale en clair', async () => {
-    const shop = await signup();
-    const tenants = (await app.inject({ url: '/admin/tenants', headers: admin() })).payload;
-    expect(tenants).not.toContain('passwordHash');
-    expect(tenants).not.toContain(shop.password);
-    expect(tenants).not.toContain('secretHash');
+  it('chiffre les clés au repos, ne les expose pas dans les listes, journalise leur lecture', async () => {
+    const { key, licenseId } = await paidLicense();
+    const row = await db.license.findUniqueOrThrow({ where: { id: licenseId } });
+    expect(row.keyEncrypted).not.toContain(key);
+    expect(row.keyHash).not.toContain(key);
+    for (const url of ['/admin/licenses', `/admin/licenses/${licenseId}`, '/admin/sales']) {
+      const payload = (await app.inject({ url, headers: staff() })).payload;
+      expect(payload).not.toContain(key);
+      expect(payload).not.toContain('keyEncrypted');
+      expect(payload).not.toContain('keyHash');
+    }
+    const before = await db.adminAuditLog.count({ where: { action: 'license.key.reveal' } });
+    await revealKey(licenseId);
+    expect(await db.adminAuditLog.count({ where: { action: 'license.key.reveal' } })).toBe(before + 1);
+  });
+
+  it('protège les historiques contre toute modification', async () => {
+    const { licenseId } = await paidLicense();
+    await expect(db.licenseEvent.deleteMany({ where: { licenseId } })).rejects.toThrow();
+    await expect(db.adminAuditLog.updateMany({ data: { action: 'x' } })).rejects.toThrow();
+  });
+
+  it('calcule le tableau de bord sur les ventes réellement payées', async () => {
+    const before = (await app.inject({ url: '/admin/dashboard', headers: staff() })).json<{ revenue: number; pendingSales: number }>();
+    await sale();
+    const { sale: paid } = await sale();
+    await confirm(paid.id);
+    const after = (await app.inject({ url: '/admin/dashboard', headers: staff() })).json<{ revenue: number; pendingSales: number; monthRevenue: number }>();
+    expect(after.revenue - before.revenue).toBe(150000);
+    expect(after.pendingSales - before.pendingSales).toBe(1);
+    expect(after.monthRevenue).toBeGreaterThanOrEqual(150000);
   });
 
   it('gère assistance et publication', async () => {
-    const shop = await signup();
-    const ticket = (await post('/v1/support', { subject: 'Aide', message: 'Bonjour' }, shop.headers)).json<{ id: string }>();
-    expect((await post(`/admin/tickets/${ticket.id}/reply`, { reply: 'Réponse' }, admin())).statusCode).toBe(200);
+    const device = new Device();
+    await device.activate((await paidLicense()).key);
+    const ticket = (await post('/v1/support', { subject: 'Aide', message: 'Bonjour' }, await device.auth('POST', '/v1/support'))).json<{ id: string }>();
+    expect((await post(`/admin/tickets/${ticket.id}/reply`, { reply: 'Réponse' }, staff())).statusCode).toBe(200);
     const version = `1.${Date.now() % 100000}.0`;
-    expect((await post('/admin/releases', { version, url: 'http://non-securise', sha512: 'a'.repeat(88), notes: '' }, admin())).statusCode).toBe(400);
-    expect((await post('/admin/releases', { version, url: 'https://cdn.test/a.exe', sha512: 'a'.repeat(88), notes: '' }, admin())).statusCode).toBe(200);
+    expect((await post('/admin/releases', { version, url: 'http://non-securise', sha512: 'a'.repeat(88), notes: '' }, owner())).statusCode).toBe(400);
+    expect((await post('/admin/releases', { version, url: 'https://cdn.test/a.exe', sha512: 'a'.repeat(88), notes: '' }, owner())).statusCode).toBe(200);
     expect((await app.inject({ url: '/v1/releases/latest' })).json<{ version: string }>().version).toBe(version);
   });
 });

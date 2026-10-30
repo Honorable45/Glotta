@@ -11,18 +11,20 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "11.2.1",
+    "@fastify/static": "9.0.0",
     "@gestion/license": "workspace:*",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "fastify": "5.12.7",
+    "pdfkit": "0.17.2",
     "pg": "8.23.1",
-    "uuid": "14.0.3",
-    "zod": "4.6.7",
     "tsx": "4.20.6",
-    "@fastify/static": "9.0.0"
+    "uuid": "14.0.3",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "24.0.0",
+    "@types/pdfkit": "0.17.3",
     "@types/pg": "8.23.1",
     "prisma": "7.10.1",
     "typescript": "7.0.2"

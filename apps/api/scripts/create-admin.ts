@@ -11,6 +11,6 @@ if (!email || !password || password.length < 12) {
 }
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env['DATABASE_URL']! }) });
 const totpSecret = newTotpSecret();
-await db.platformAdmin.create({ data: { id: newId(), email: email.toLowerCase(), passwordHash: await hashPassword(password), totpSecret } });
-console.log(`Administrateur créé. Clé à ajouter dans votre application d'authentification : ${totpSecret}`);
+await db.platformAdmin.create({ data: { id: newId(), email: email.toLowerCase(), role: 'OWNER', passwordHash: await hashPassword(password), totpSecret } });
+console.log(`Compte propriétaire créé. Clé à ajouter dans votre application d'authentification : ${totpSecret}`);
 await db.$disconnect();

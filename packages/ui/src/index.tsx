@@ -48,7 +48,7 @@ export function DetailList({ items }: { items: { label: string; value: ReactNode
   return (
     <dl className="divide-y divide-border">
       {items.map((item) => (
-        <div key={item.label} className="flex items-center justify-between gap-6 py-2.5 first:pt-0 last:pb-0">
+        <div key={item.label} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-2.5 first:pt-0 last:pb-0">
           <dt className="text-sm text-muted">{item.label}</dt>
           <dd className="text-right text-sm font-medium tabular-nums">{item.value}</dd>
         </div>
@@ -212,6 +212,7 @@ export function DataTable<T>({
 }) {
   if (rows.length === 0) return <p className="py-6 text-center text-sm text-muted">{empty}</p>;
   return (
+    <div className="overflow-x-auto">
     <table className="w-full border-collapse text-sm">
       <thead>
         <tr className="border-b border-border text-left text-xs text-muted">
@@ -234,5 +235,6 @@ export function DataTable<T>({
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
