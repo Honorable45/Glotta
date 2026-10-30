@@ -1,0 +1,32 @@
+appId: com.gestioncommerciale.app
+productName: Gestion Commerciale
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+  - "!**/prebuilds/{darwin,linux,linuxmusl,win32-arm64}*"
+asar: true
+asarUnpack:
+  - "**/*.node"
+extraResources:
+  - from: ../../packages/db-local/prisma/migrations
+    to: migrations
+  - from: resources/license-public.pem
+    to: license-public.pem
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true

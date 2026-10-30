@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+*.db
+*.db-wal
+*.db-shm
+packages/db-local/src/generated/
+packages/db-local/.dev/
+test-results/
+playwright-report/
+apps/api/src/generated/

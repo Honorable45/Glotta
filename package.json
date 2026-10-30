@@ -1,0 +1,36 @@
+{
+  "name": "gestion",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "postinstall": "pnpm --filter @gestion/db-local generate",
+    "dev": "pnpm --filter @gestion/desktop dev",
+    "build": "pnpm --filter @gestion/desktop build && pnpm --filter @gestion/admin build",
+    "dist:win": "pnpm --filter @gestion/desktop dist:win",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:e2e": "pnpm build && playwright test",
+    "verify": "pnpm typecheck && pnpm test && pnpm test:e2e",
+    "test:db": "podman run -d --name gestion-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gestion_test -p 127.0.0.1:55432:5432 docker.io/library/postgres:16-alpine && sleep 4 && pnpm --filter @gestion/api migrate"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "better-sqlite3": "link:packages/sqlite-driver",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "better-sqlite3": "link:./packages/sqlite-driver"
+    },
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "@prisma/engines",
+      "prisma"
+    ]
+  }
+}

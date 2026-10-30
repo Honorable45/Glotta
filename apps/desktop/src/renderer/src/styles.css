@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter/index.css';
+@import '@gestion/ui/tokens.css';
+@source '../../../../../packages/ui/src';
+
+@theme inline {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --color-canvas: var(--color-canvas);
+  --color-surface: var(--color-surface);
+  --color-sidebar: var(--color-sidebar);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-muted: var(--color-muted);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-on-primary: var(--color-on-primary);
+  --color-selected: var(--color-selected);
+  --color-selected-text: var(--color-selected-text);
+  --color-success: var(--color-success);
+  --color-success-bg: var(--color-success-bg);
+  --color-danger: var(--color-danger);
+  --color-danger-bg: var(--color-danger-bg);
+  --color-focus: var(--color-focus);
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

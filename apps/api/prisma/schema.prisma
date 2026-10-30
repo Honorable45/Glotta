@@ -1,0 +1,156 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated"
+  moduleFormat        = "esm"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Plan {
+  code      String  @id
+  name      String
+  /// Prix mensuel en FCFA.
+  price     Int
+  maxUsers  Int
+  maxStores Int
+  features  String[]
+  isActive  Boolean @default(true)
+}
+
+/// Valeurs configurables depuis l'administration.
+model PlatformSetting {
+  key   String @id
+  value Int
+}
+
+model Tenant {
+  id           String        @id
+  name         String
+  email        String        @unique
+  phone        String?
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  devices      TenantDevice[]
+  subscription Subscription?
+  payments     PaymentIntent[]
+  tickets      SupportTicket[]
+}
+
+model TenantDevice {
+  id         String    @id
+  tenantId   String
+  name       String
+  secretHash String
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+}
+
+model Subscription {
+  tenantId    String              @id
+  planCode    String
+  status      String
+  startsAt    DateTime
+  expiresAt   DateTime
+  isTrial     Boolean             @default(false)
+  suspendedAt DateTime?
+  tenant      Tenant              @relation(fields: [tenantId], references: [id])
+  events      SubscriptionEvent[]
+}
+
+/// En ajout seul.
+model SubscriptionEvent {
+  id           String       @id
+  tenantId     String
+  type         String
+  details      Json
+  actor        String
+  createdAt    DateTime     @default(now())
+  subscription Subscription @relation(fields: [tenantId], references: [tenantId])
+
+  @@index([tenantId])
+}
+
+model PaymentIntent {
+  id          String    @id
+  tenantId    String
+  planCode    String
+  months      Int
+  amount      Int
+  provider    String
+  providerRef String?
+  /// PENDING, CONFIRMED ou FAILED. Seule une confirmation du prestataire donne CONFIRMED.
+  status      String    @default("PENDING")
+  appliedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model SupportTicket {
+  id        String   @id
+  tenantId  String
+  subject   String
+  message   String
+  status    String   @default("OPEN")
+  reply     String?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+}
+
+model AppRelease {
+  id          String   @id
+  version     String   @unique
+  url         String
+  sha512      String
+  notes       String
+  publishedAt DateTime @default(now())
+}
+
+model PlatformAdmin {
+  id           String    @id
+  email        String    @unique
+  passwordHash String
+  totpSecret   String
+}
+
+model AdminSession {
+  tokenHash String   @id
+  adminId   String
+  expiresAt DateTime
+}
+
+/// En ajout seul.
+model AdminAuditLog {
+  id        String   @id
+  adminId   String
+  action    String
+  details   Json
+  createdAt DateTime @default(now())
+}
+
+model TechnicalLog {
+  id        String   @id
+  level     String
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Contenu chiffré sur les postes : le serveur ne peut pas le lire.
+model SyncEnvelope {
+  seq        BigInt   @id @default(autoincrement())
+  id         String   @unique
+  tenantId   String
+  deviceId   String
+  ciphertext String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, seq])
+}

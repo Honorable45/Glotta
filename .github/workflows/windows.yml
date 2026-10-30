@@ -1,0 +1,31 @@
+name: Windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # L'adresse de l'API et la clé publique sont figées dans l'installateur.
+      MAIN_VITE_API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # Les tests qui exigent PostgreSQL tournent sur le poste de développement.
+      - run: pnpm vitest run --exclude "apps/api/**"
+      - name: Écrire la clé publique
+        shell: bash
+        run: printf '%s' "${{ vars.LICENSE_PUBLIC_KEY }}" > apps/desktop/resources/license-public.pem
+      - run: pnpm dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installateur-windows
+          path: apps/desktop/dist/*.exe

@@ -1,0 +1,30 @@
+{
+  "name": "@gestion/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "11.2.1",
+    "@gestion/license": "workspace:*",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "fastify": "5.12.7",
+    "pg": "8.23.1",
+    "uuid": "14.0.3",
+    "zod": "4.6.7",
+    "tsx": "4.20.6",
+    "@fastify/static": "9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.1",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,466 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated"
+  moduleFormat        = "esm"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Device {
+  id        String   @id
+  isLocal   Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Journal en ajout seul, protégé par des déclencheurs et chaîné par hachage.
+model AuditLog {
+  seq        Int     @id @default(autoincrement())
+  id         String  @unique
+  occurredAt String
+  deviceId   String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  details    String
+  prevHash   String
+  hash       String
+}
+
+/// Événements à synchroniser, écrits dans la même transaction que la donnée.
+model OutboxEvent {
+  id         String    @id
+  occurredAt String
+  deviceId   String
+  eventType  String
+  entityType String
+  entityId   String
+  payload    String
+  sentAt     DateTime?
+  attempts   Int       @default(0)
+
+  @@index([sentAt])
+}
+
+model Company {
+  id          String   @id
+  name        String
+  logoData    String?
+  address     String
+  phone       String
+  email       String?
+  currency    String
+  taxInfo     String?
+  sector      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  stores      Store[]
+}
+
+model Store {
+  id        String   @id
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+  company   Company  @relation(fields: [companyId], references: [id])
+}
+
+model Category {
+  id         String              @id
+  name       String
+  parentId   String?
+  archivedAt DateTime?
+  createdAt  DateTime            @default(now())
+  parent     Category?           @relation("CategoryTree", fields: [parentId], references: [id])
+  children   Category[]          @relation("CategoryTree")
+  attributes CategoryAttribute[]
+  products   Product[]
+}
+
+model Unit {
+  id            String    @id
+  name          String
+  symbol        String
+  allowsDecimal Boolean   @default(false)
+  archivedAt    DateTime?
+  products      Product[]
+}
+
+/// Caractéristique définie par le commerçant. Les choix d'une liste sont stockés en JSON.
+model AttributeDefinition {
+  id         String              @id
+  name       String
+  type       String
+  required   Boolean             @default(false)
+  options    String              @default("[]")
+  archivedAt DateTime?
+  categories CategoryAttribute[]
+  values     ProductAttributeValue[]
+}
+
+model CategoryAttribute {
+  categoryId  String
+  attributeId String
+  category    Category            @relation(fields: [categoryId], references: [id])
+  attribute   AttributeDefinition @relation(fields: [attributeId], references: [id])
+
+  @@id([categoryId, attributeId])
+}
+
+model PaymentMethod {
+  id       String  @id
+  name     String
+  isActive Boolean @default(true)
+  isCash   Boolean @default(false)
+  position Int     @default(0)
+}
+
+model Product {
+  id                String                  @id
+  name              String
+  /// Nom, référence, codes-barres et SKU normalisés, pour une recherche sans accents.
+  searchText        String
+  reference         String?
+  categoryId        String?
+  unitId            String
+  taxRateBp         Int                     @default(0)
+  trackSerial       Boolean                 @default(false)
+  lowStockThreshold BigInt?
+  archivedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  category          Category?               @relation(fields: [categoryId], references: [id])
+  unit              Unit                    @relation(fields: [unitId], references: [id])
+  variants          ProductVariant[]
+  attributes        ProductAttributeValue[]
+
+  @@index([searchText])
+}
+
+model ProductVariant {
+  id            String          @id
+  productId     String
+  label         String          @default("")
+  sku           String?
+  barcode       String?         @unique
+  purchasePrice BigInt
+  salePrice     BigInt
+  archivedAt    DateTime?
+  product       Product         @relation(fields: [productId], references: [id])
+  stockLevels   StockLevel[]
+  movements     StockMovement[]
+  serials       SerialUnit[]
+  saleLines     SaleLine[]
+}
+
+model ProductAttributeValue {
+  productId   String
+  attributeId String
+  value       String
+  product     Product             @relation(fields: [productId], references: [id])
+  attribute   AttributeDefinition @relation(fields: [attributeId], references: [id])
+
+  @@id([productId, attributeId])
+}
+
+/// Cache recalculable de la somme des mouvements.
+model StockLevel {
+  variantId String
+  storeId   String
+  quantity  BigInt         @default(0)
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@id([variantId, storeId])
+}
+
+/// En ajout seul : source de vérité du stock. Quantité signée, en millièmes.
+model StockMovement {
+  id         String         @id
+  variantId  String
+  storeId    String
+  type       String
+  quantity   BigInt
+  unitCost   BigInt?
+  reason     String?
+  refType    String?
+  refId      String?
+  userId     String?
+  occurredAt String
+  variant    ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([variantId, occurredAt])
+}
+
+model SerialUnit {
+  id         String         @id
+  variantId  String
+  storeId    String
+  serial     String         @unique
+  status     String         @default("IN_STOCK")
+  saleLineId String?
+  variant    ProductVariant @relation(fields: [variantId], references: [id])
+  saleLine   SaleLine?      @relation(fields: [saleLineId], references: [id])
+
+  @@index([variantId, status])
+}
+
+model InventoryCount {
+  id        String               @id
+  storeId   String
+  startedAt String
+  closedAt  String?
+  lines     InventoryCountLine[]
+}
+
+model InventoryCountLine {
+  id        String         @id
+  countId   String
+  variantId String
+  expected  BigInt
+  counted   BigInt?
+  count     InventoryCount @relation(fields: [countId], references: [id])
+
+  @@unique([countId, variantId])
+}
+
+model Customer {
+  id         String    @id
+  name       String
+  searchText String
+  phone      String?
+  whatsapp   String?
+  address    String?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  sales      Sale[]
+  debts      Debt[]
+
+  @@index([searchText])
+}
+
+model Sale {
+  id           String        @id
+  number       String        @unique
+  storeId      String
+  deviceId     String
+  customerId   String?
+  status       String        @default("COMPLETED")
+  subtotal     BigInt
+  discount     BigInt
+  tax          BigInt
+  total        BigInt
+  /// Montants nets après retours et paiements : conservés pour des rapports rapides.
+  netTotal     BigInt
+  netPaid      BigInt
+  userId       String?
+  occurredAt   String
+  cancelReason String?
+  customer     Customer?     @relation(fields: [customerId], references: [id])
+  lines        SaleLine[]
+  payments     SalePayment[]
+  returns      SaleReturn[]
+  debt         Debt?
+
+  @@index([occurredAt])
+  @@index([customerId])
+}
+
+/// Prix, coût, nom et taxe copiés : modifier un produit ne change pas une vente passée.
+model SaleLine {
+  id            String           @id
+  saleId        String
+  variantId     String
+  productName   String
+  variantLabel  String
+  quantity      BigInt
+  unitPrice     BigInt
+  unitCost      BigInt
+  lineDiscount  BigInt
+  cartDiscount  BigInt
+  taxRateBp     Int
+  tax           BigInt
+  lineTotal     BigInt
+  sale          Sale             @relation(fields: [saleId], references: [id])
+  variant       ProductVariant   @relation(fields: [variantId], references: [id])
+  serials       SerialUnit[]
+  returnLines   SaleReturnLine[]
+
+  @@index([saleId])
+}
+
+/// En ajout seul. Un remboursement a un montant négatif.
+model SalePayment {
+  id         String  @id
+  saleId     String
+  methodId   String
+  methodName String
+  amount     BigInt
+  kind       String
+  returnId   String?
+  userId     String?
+  occurredAt String
+  sale       Sale    @relation(fields: [saleId], references: [id])
+
+  @@index([saleId])
+  @@index([occurredAt])
+}
+
+model SaleReturn {
+  id         String           @id
+  saleId     String
+  reason     String
+  amount     BigInt
+  refund     BigInt
+  userId     String?
+  occurredAt String
+  sale       Sale             @relation(fields: [saleId], references: [id])
+  lines      SaleReturnLine[]
+}
+
+model SaleReturnLine {
+  id         String     @id
+  returnId   String
+  saleLineId String
+  quantity   BigInt
+  amount     BigInt
+  restock    Boolean
+  saleReturn SaleReturn @relation(fields: [returnId], references: [id])
+  saleLine   SaleLine   @relation(fields: [saleLineId], references: [id])
+}
+
+/// Créance née d'une vente à crédit. Solde et statut sont calculés depuis la vente.
+model Debt {
+  id         String    @id
+  saleId     String    @unique
+  customerId String
+  dueDate    String?
+  createdAt  DateTime  @default(now())
+  sale       Sale      @relation(fields: [saleId], references: [id])
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  reminders  Reminder[]
+}
+
+model ExpenseCategory {
+  id         String    @id
+  name       String
+  archivedAt DateTime?
+  expenses   Expense[]
+}
+
+model Expense {
+  id         String          @id
+  label      String
+  categoryId String
+  amount     BigInt
+  /// Date locale AAAA-MM-JJ.
+  date       String
+  comment    String?
+  userId     String?
+  voidedAt   String?
+  voidReason String?
+  paidFromCash Boolean        @default(false)
+  createdAt  DateTime        @default(now())
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([date])
+}
+
+model CashSession {
+  id            String         @id
+  storeId       String
+  openingFloat  BigInt
+  openedAt      String
+  closedAt      String?
+  expected      BigInt?
+  counted       BigInt?
+  note          String?
+  userId        String?
+  movements     CashMovement[]
+
+  @@index([closedAt])
+}
+
+/// En ajout seul.
+model CashMovement {
+  id         String      @id
+  sessionId  String
+  type       String
+  amount     BigInt
+  reason     String
+  userId     String?
+  occurredAt String
+  session    CashSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId])
+}
+
+model User {
+  id           String    @id
+  name         String
+  login        String    @unique
+  passwordHash String
+  role         String
+  /// Exceptions au rôle, en JSON : { "permission": true | false }.
+  overrides    String    @default("{}")
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Reminder {
+  id        String  @id
+  debtId    String
+  /// Date locale AAAA-MM-JJ.
+  dueDate   String
+  note      String?
+  /// PLANNED, puis OPENED quand WhatsApp a été ouvert, puis DONE quand le commerçant le confirme.
+  state     String  @default("PLANNED")
+  openedAt  String?
+  doneAt    String?
+  createdAt String
+  debt      Debt    @relation(fields: [debtId], references: [id])
+
+  @@index([state, dueDate])
+}
+
+/// Rempli par des déclencheurs : aucun changement ne peut échapper à la synchronisation.
+model ChangeLog {
+  seq       Int    @id @default(autoincrement())
+  tableName String
+  rowKey    String
+  op        String
+  at        String
+}
+
+/// Dernière version connue de chaque ligne modifiable, pour départager les conflits.
+model SyncRowVersion {
+  tableName String
+  rowKey    String
+  at        String
+  deviceId  String
+
+  @@id([tableName, rowKey])
+}
+
+model SyncConflict {
+  id         String  @id
+  kind       String
+  message    String
+  occurredAt String
+  resolvedAt String?
+}
+
+/// Vaut 1 pendant l'application d'un changement distant, pour ne pas le renvoyer.
+model SyncFlag {
+  id       Int @id @default(1)
+  applying Int @default(0)
+}

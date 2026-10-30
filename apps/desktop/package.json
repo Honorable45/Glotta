@@ -1,0 +1,43 @@
+{
+  "name": "@gestion/desktop",
+  "productName": "Gestion Commerciale",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Logiciel de gestion commerciale",
+  "author": "Gestion Commerciale",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "electron-vite build",
+    "dist:win": "electron-vite build && electron-builder --win --x64",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "better-sqlite3-multiple-ciphers": "13.0.3",
+    "exceljs": "4.4.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@gestion/contracts": "workspace:*",
+    "@gestion/db-local": "workspace:*",
+    "@gestion/domain": "workspace:*",
+    "@gestion/license": "workspace:*",
+    "@gestion/ui": "workspace:*",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.0.0",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "lucide-react": "1.65.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "zod": "4.6.7"
+  }
+}

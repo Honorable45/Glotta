@@ -1,0 +1,22 @@
+{
+  "name": "@gestion/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./channels": "./src/channels.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.6.7",
+    "@gestion/domain": "workspace:*",
+    "@gestion/license": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "typescript": "7.0.2"
+  }
+}
