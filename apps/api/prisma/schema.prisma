@@ -9,98 +9,151 @@ datasource db {
   provider = "postgresql"
 }
 
-model Plan {
-  code      String  @id
-  name      String
-  /// Prix mensuel en FCFA.
-  price     Int
-  maxUsers  Int
-  maxStores Int
-  features  String[]
-  isActive  Boolean @default(true)
+/// Édition vendue : prix et limites ne sont jamais codés en dur.
+model Edition {
+  code         String   @id
+  name         String
+  description  String   @default("")
+  /// Prix de vente unique en FCFA.
+  price        Int
+  maxUsers     Int
+  maxStores    Int
+  maxDevices   Int      @default(1)
+  features     String[]
+  /// Grande version du logiciel couverte par une nouvelle vente.
+  majorVersion Int      @default(1)
+  /// Stockage de synchronisation alloué, en mégaoctets.
+  syncQuotaMb  Int      @default(0)
+  isActive     Boolean  @default(true)
+  licenses     License[]
+  sales        Sale[]
 }
 
-/// Valeurs configurables depuis l'administration.
+/// Valeurs configurables depuis la plateforme : durée d'essai, identité du vendeur sur les reçus.
 model PlatformSetting {
   key   String @id
-  value Int
+  value String
 }
 
-model Tenant {
-  id           String        @id
-  name         String
-  email        String        @unique
-  phone        String?
-  passwordHash String
-  createdAt    DateTime      @default(now())
-  devices      TenantDevice[]
-  subscription Subscription?
-  payments     PaymentIntent[]
-  tickets      SupportTicket[]
-}
-
-model TenantDevice {
-  id         String    @id
-  tenantId   String
-  name       String
-  secretHash String
-  lastSeenAt DateTime?
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  tenant     Tenant    @relation(fields: [tenantId], references: [id])
-}
-
-model Subscription {
-  tenantId    String              @id
-  planCode    String
-  status      String
-  startsAt    DateTime
-  expiresAt   DateTime
-  isTrial     Boolean             @default(false)
-  suspendedAt DateTime?
-  tenant      Tenant              @relation(fields: [tenantId], references: [id])
-  events      SubscriptionEvent[]
-}
-
-/// En ajout seul.
-model SubscriptionEvent {
-  id           String       @id
-  tenantId     String
-  type         String
-  details      Json
-  actor        String
-  createdAt    DateTime     @default(now())
-  subscription Subscription @relation(fields: [tenantId], references: [tenantId])
-
-  @@index([tenantId])
-}
-
-model PaymentIntent {
+model Customer {
   id          String    @id
-  tenantId    String
-  planCode    String
-  months      Int
-  amount      Int
-  provider    String
-  providerRef String?
-  /// PENDING, CONFIRMED ou FAILED. Seule une confirmation du prestataire donne CONFIRMED.
-  status      String    @default("PENDING")
-  appliedAt   DateTime?
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  notes       String?
   createdAt   DateTime  @default(now())
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  licenses    License[]
+  sales       Sale[]
+  tickets     SupportTicket[]
 
-  @@index([tenantId])
+  @@index([name])
+}
+
+model License {
+  id              String       @id
+  /// Empreinte pour retrouver la licence, copie chiffrée pour la renvoyer au client.
+  keyHash         String       @unique
+  keyEncrypted    String
+  keyHint         String
+  customerId      String
+  editionCode     String
+  /// PENDING, ACTIVE, SUSPENDED ou REVOKED. PENDING refuse toute activation.
+  status          String       @default("PENDING")
+  statusReason    String?
+  isTrial         Boolean      @default(false)
+  trialEndsAt     DateTime?
+  // Copiés à l'émission : modifier une édition ne dégrade pas une licence déjà vendue.
+  editionName     String
+  features        String[]
+  maxUsers        Int
+  maxStores       Int
+  maxDevices      Int
+  syncQuotaMb     Int
+  maxMajorVersion Int
+  syncBytes       BigInt       @default(0)
+  createdAt       DateTime     @default(now())
+  customer        Customer     @relation(fields: [customerId], references: [id])
+  edition         Edition      @relation(fields: [editionCode], references: [code])
+  activations     Activation[]
+  events          LicenseEvent[]
+  sales           Sale[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+/// En ajout seul : protégé par un déclencheur.
+model LicenseEvent {
+  id        String   @id
+  licenseId String
+  type      String
+  details   Json
+  actor     String
+  createdAt DateTime @default(now())
+  license   License  @relation(fields: [licenseId], references: [id])
+
+  @@index([licenseId])
+}
+
+model Activation {
+  id                String    @id
+  licenseId         String
+  deviceFingerprint String
+  devicePublicKey   String
+  deviceName        String
+  appVersion        String
+  /// ONLINE ou OFFLINE.
+  method            String
+  lastSeenAt        DateTime?
+  /// Libérée par transfert : la place redevient disponible.
+  releasedAt        DateTime?
+  releaseReason     String?
+  createdAt         DateTime  @default(now())
+  license           License   @relation(fields: [licenseId], references: [id])
+
+  @@unique([licenseId, deviceFingerprint])
+  @@index([licenseId])
+}
+
+/// Paiement manuel : seule la confirmation d'un administrateur délivre la licence.
+model Sale {
+  id               String    @id
+  number           Int       @unique @default(autoincrement())
+  customerId       String
+  editionCode      String
+  licenseId        String
+  /// NEW : première vente. UPGRADE : droit à une grande version supérieure.
+  kind             String    @default("NEW")
+  targetMajor      Int
+  amount           Int
+  /// PENDING, PAID, CANCELLED ou REFUNDED.
+  status           String    @default("PENDING")
+  paymentMethod    String?
+  paymentReference String?
+  paidAt           DateTime?
+  statusReason     String?
+  createdBy        String
+  confirmedBy      String?
+  createdAt        DateTime  @default(now())
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  edition          Edition   @relation(fields: [editionCode], references: [code])
+  license          License   @relation(fields: [licenseId], references: [id])
+
+  @@index([status])
+  @@index([customerId])
 }
 
 model SupportTicket {
-  id        String   @id
-  tenantId  String
-  subject   String
-  message   String
-  status    String   @default("OPEN")
-  reply     String?
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  id         String   @id
+  customerId String
+  subject    String
+  message    String
+  status     String   @default("OPEN")
+  reply      String?
+  createdAt  DateTime @default(now())
+  customer   Customer @relation(fields: [customerId], references: [id])
 }
 
 model AppRelease {
@@ -115,8 +168,12 @@ model AppRelease {
 model PlatformAdmin {
   id           String    @id
   email        String    @unique
+  name         String    @default("")
+  /// OWNER : éditions, remboursements, comptes. ADMIN : clients, ventes, licences.
+  role         String    @default("ADMIN")
   passwordHash String
   totpSecret   String
+  disabledAt   DateTime?
 }
 
 model AdminSession {
@@ -125,13 +182,15 @@ model AdminSession {
   expiresAt DateTime
 }
 
-/// En ajout seul.
+/// En ajout seul : protégé par un déclencheur.
 model AdminAuditLog {
   id        String   @id
   adminId   String
   action    String
   details   Json
   createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model TechnicalLog {
@@ -145,12 +204,12 @@ model TechnicalLog {
 
 /// Contenu chiffré sur les postes : le serveur ne peut pas le lire.
 model SyncEnvelope {
-  seq        BigInt   @id @default(autoincrement())
-  id         String   @unique
-  tenantId   String
-  deviceId   String
-  ciphertext String
-  createdAt  DateTime @default(now())
+  seq          BigInt   @id @default(autoincrement())
+  id           String   @unique
+  licenseId    String
+  activationId String
+  ciphertext   String
+  createdAt    DateTime @default(now())
 
-  @@index([tenantId, seq])
+  @@index([licenseId, seq])
 }

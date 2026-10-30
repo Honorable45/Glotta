@@ -43,3 +43,4 @@ Le déploiement du serveur et de l'installateur est décrit dans [docs/DEPLOIEME
 3. L'enregistrer dans `prisma/migrations/<horodatage>_<nom>/migration.sql`.
 
 Une migration livrée n'est jamais modifiée : l'application refuse alors de démarrer. Une migration qui reconstruit une table doit recréer ses déclencheurs d'ajout seul et de synchronisation. Une nouvelle table à synchroniser doit être ajoutée à `TABLES` dans `sync.service.ts`, avec ses déclencheurs.
+# Glotta
