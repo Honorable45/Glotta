@@ -24,7 +24,7 @@ function Login({ onDone }: { onDone: (role: string) => void }) {
             .catch((cause: Error) => setError(cause.message));
         }}
       >
-        <h1 className="text-lg font-semibold tracking-tight">Gestion des licences</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Glotta : licences</h1>
         <Field label="Email"><Input type="email" autoComplete="username" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
         <Field label="Mot de passe"><Input type="password" autoComplete="current-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
         <Field label="Code d'authentification"><Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={form.totp} onChange={(event) => setForm({ ...form, totp: event.target.value })} /></Field>
@@ -65,7 +65,7 @@ function App() {
         <Button variant="secondary" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>Menu</Button>
       </header>
       <aside className={`${menuOpen ? 'flex' : 'hidden'} shrink-0 flex-col gap-0.5 border-b border-border bg-sidebar p-3 md:flex md:w-52 md:border-b-0 md:border-r`}>
-        <p className="mb-3 hidden px-2 text-sm font-semibold md:block">Gestion des licences</p>
+        <p className="mb-3 hidden px-2 text-sm font-semibold md:block">Glotta : licences</p>
         <nav aria-label="Sections" className="flex flex-col gap-0.5">
           {sections.map((item) => (
             <button key={item.key} type="button" className={`rounded-md px-2.5 py-2 text-left text-sm ${item.key === section ? 'bg-selected font-medium text-selected-text' : 'text-muted hover:bg-canvas'}`} onClick={() => { setSection(item.key); setMenuOpen(false); }}>

@@ -1,5 +1,5 @@
-appId: com.gestioncommerciale.app
-productName: Gestion Commerciale
+appId: com.glotta.app
+productName: Glotta
 directories:
   output: dist
   buildResources: resources

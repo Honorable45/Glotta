@@ -1,6 +1,6 @@
-# Gestion Commerciale
+# Glotta
 
-Logiciel desktop de gestion commerciale pour Windows, utilisable hors ligne, vendu en licence à vie, avec une plateforme web privée de gestion des clients, ventes et licences.
+Glotta est un logiciel desktop de gestion commerciale pour Windows, utilisable hors ligne, vendu en licence à vie, avec une plateforme web privée de gestion des clients, ventes et licences.
 
 ## Commandes
 

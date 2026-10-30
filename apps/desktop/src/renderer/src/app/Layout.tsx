@@ -19,7 +19,7 @@ export function Layout() {
   return (
     <div className="flex h-screen">
       <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar">
-        <div className="px-5 py-4 text-sm font-semibold tracking-tight">Gestion Commerciale</div>
+        <div className="px-5 py-4 text-sm font-semibold tracking-tight">Glotta</div>
         <nav aria-label="Navigation principale" className="flex flex-col gap-0.5 overflow-y-auto px-2.5">
           {items.map(({ path, label, icon: Icon }) => (
             <NavLink

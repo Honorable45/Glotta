@@ -1,10 +1,10 @@
 {
   "name": "@gestion/desktop",
-  "productName": "Gestion Commerciale",
+  "productName": "Glotta",
   "version": "0.1.0",
   "private": true,
-  "description": "Logiciel de gestion commerciale",
-  "author": "Gestion Commerciale",
+  "description": "Glotta, logiciel de gestion commerciale",
+  "author": "Glotta",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
