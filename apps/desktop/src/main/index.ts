@@ -28,6 +28,7 @@ import { createBackupManager } from './services/backupManager';
 import { reportToCsv, reportToHtml, reportToXlsx } from './services/exporter';
 import { htmlToPdf, printHtml } from './services/print';
 import { buildReceiptHtml } from './services/receipt';
+import { isSameFileUrl } from './services/rendererUrl';
 
 /** Le code est stocké sous sa forme d'origine ; la dérivation de clé l'uniformise elle-même. */
 const normalizeRecovery = (code: string) => normalizeCode(code).match(/.{1,5}/g)?.join('-') ?? code;
@@ -66,9 +67,8 @@ function protector(): SecretProtector {
 function isTrustedUrl(url: string | undefined): boolean {
   if (!url) return false;
   try {
-    const parsed = new URL(url);
-    if (devRendererUrl) return parsed.origin === new URL(devRendererUrl).origin;
-    return parsed.protocol === 'file:' && resolve(decodeURIComponent(parsed.pathname)) === resolve(rendererFile);
+    if (devRendererUrl) return new URL(url).origin === new URL(devRendererUrl).origin;
+    return isSameFileUrl(url, rendererFile);
   } catch {
     return false;
   }
