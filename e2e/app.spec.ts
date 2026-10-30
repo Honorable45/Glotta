@@ -21,7 +21,7 @@ test('démarre sur une base chiffrée intègre', async () => {
   await expect(page.getByText('Chiffrée', { exact: true })).toBeVisible();
   await expect(page.getByText('Intègre', { exact: true })).toBeVisible();
   await expect(page.getByText('Non altéré', { exact: true })).toBeVisible();
-  await expect(page.getByText('0.1.0', { exact: true })).toBeVisible();
+  await expect(page.getByText('1.0.0', { exact: true })).toBeVisible();
   await app.close();
   expect(readdirSync(userData)).toContain('gestion.db');
   expect(readFileSync(join(userData, 'gestion.db')).subarray(0, 15).toString()).not.toBe('SQLite format 3');

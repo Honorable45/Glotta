@@ -20,3 +20,9 @@
 - Un administrateur de la plateforme qui confirme un paiement engage la délivrance : aucune vérification externe n'existe, par choix du modèle de paiement manuel.
 - Le numéro de reçu sert aussi de numéro de vente : ce n'est pas une facture fiscale. Vérifiez vos obligations locales.
 - Le journal d'activité chaîné est propre à chaque poste, et n'est pas synchronisé.
+
+## Installation du serveur
+
+`deploy/install.sh` et `deploy/update.sh` n'ont pas encore tourné sur un vrai serveur. L'installation limitée au serveur, les migrations, le démarrage et `/health` ont été vérifiés sur une copie propre du projet, sans systemd, Caddy ni HTTPS.
+
+`render.yaml` n'a pas encore été déployé sur Render : seul son build a été vérifié, sur une copie propre du projet.

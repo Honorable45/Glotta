@@ -1,0 +1,36 @@
+# Plateforme Glotta sur Render. La clé privée est demandée à la création et n'est jamais versionnée.
+databases:
+  - name: glotta-db
+    databaseName: glotta
+    user: glotta
+    plan: 0.1c-256mb
+    region: frankfurt
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: glotta
+    runtime: node
+    plan: 0.5c-512mb
+    region: frankfurt
+    branch: main
+    # --prod=false : Prisma et Vite sont nécessaires au build, même avec NODE_ENV=production.
+    buildCommand: npx -y pnpm@9.15.9 install --frozen-lockfile --prod=false --ignore-scripts --filter @gestion/api... --filter @gestion/admin... && npx -y pnpm@9.15.9 --filter @gestion/api generate && npx -y pnpm@9.15.9 --filter @gestion/admin build
+    preDeployCommand: cd apps/api && ../../node_modules/.bin/prisma migrate deploy
+    startCommand: cd apps/api && ../../node_modules/.bin/tsx src/server.ts
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ADMIN_DIST
+        value: /opt/render/project/src/apps/admin/dist
+      - key: DATABASE_URL
+        fromDatabase:
+          name: glotta-db
+          property: connectionString
+      - key: LICENSE_PRIVATE_KEY
+        sync: false
