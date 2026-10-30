@@ -193,6 +193,47 @@ test('de bout en bout : vente manuelle, activation en ligne, reçu, suspension, 
   await expect(consolePage.getByRole('cell', { name: 'Paiement confirmé' }).first()).toBeVisible();
 });
 
+test('mise à niveau vendue par la plateforme : le droit augmente seulement après paiement', async () => {
+  const id = stamp();
+  const customer = `Fidèle ${id}`;
+  const first = `Version un ${id}`;
+  const second = `Version deux ${id}`;
+  await createEdition(first, '100000');
+  await sell(customer, first);
+  await expect(consolePage.getByText("jusqu'à 1.x")).toBeVisible();
+  await consolePage.getByRole('button', { name: 'Fermer' }).click();
+
+  await section('Éditions et tarifs');
+  await consolePage.getByRole('button', { name: 'Nouvelle édition' }).click();
+  await consolePage.getByLabel(/^Code/).fill(`V2${id}`);
+  await consolePage.getByLabel("Nom de l'édition").fill(second);
+  await consolePage.getByLabel('Prix de vente (FCFA)').fill('40000');
+  await consolePage.getByLabel('Grande version couverte').fill('2');
+  await consolePage.getByRole('button', { name: "Enregistrer l'édition" }).click();
+  await expect(consolePage.getByRole('cell', { name: new RegExp(second) })).toBeVisible();
+
+  await section('Ventes');
+  await consolePage.getByRole('button', { name: 'Nouvelle vente' }).click();
+  await consolePage.getByLabel(/^Client/).selectOption({ label: customer });
+  await consolePage.getByLabel(/^Édition/).selectOption({ label: second });
+  await consolePage.getByLabel(/^Type de vente/).selectOption({ index: 1 });
+  await consolePage.getByRole('button', { name: 'Créer la vente' }).click();
+  const row = consolePage.getByRole('row', { name: new RegExp(`${customer}.*${second}`) });
+  await expect(row.getByText('Mise à niveau')).toBeVisible();
+  await row.getByRole('button', { name: /^…/ }).click();
+  await expect(consolePage.getByText("jusqu'à 1.x")).toBeVisible();
+  await consolePage.getByRole('button', { name: 'Fermer' }).click();
+
+  await section('Ventes');
+  await row.getByRole('button', { name: 'Confirmer le paiement' }).click();
+  await consolePage.getByLabel('Mode de paiement').fill('Espèces');
+  await consolePage.getByRole('button', { name: "J'ai reçu le paiement" }).click();
+  await expect(row.getByText('Payé')).toBeVisible();
+  await row.getByRole('button', { name: /^…/ }).click();
+  await expect(consolePage.getByText("jusqu'à 2.x")).toBeVisible();
+  await consolePage.getByRole('button', { name: 'Fermer' }).click();
+});
+
 test('activation hors ligne complète, sans adresse de serveur sur le poste', async () => {
   const id = stamp();
   const edition = `Hors ligne ${id}`;

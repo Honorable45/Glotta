@@ -18,12 +18,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @gestion/api generate
       - run: pnpm typecheck
       # Les tests qui exigent PostgreSQL tournent sur le poste de développement.
       - run: pnpm vitest run --exclude "apps/api/**"
       - name: Écrire la clé publique
         shell: bash
-        run: printf '%s' "${{ vars.LICENSE_PUBLIC_KEY }}" > apps/desktop/resources/license-public.pem
+        run: mkdir -p apps/desktop/resources && printf '%s' "${{ vars.LICENSE_PUBLIC_KEY }}" > apps/desktop/resources/license-public.pem
       - run: pnpm dist:win
       - uses: actions/upload-artifact@v4
         with:

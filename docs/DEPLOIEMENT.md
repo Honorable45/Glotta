@@ -25,7 +25,7 @@ pnpm --filter @gestion/api migrate
 pnpm --filter @gestion/api start
 ```
 
-Le serveur écoute sur `127.0.0.1:8080` (`HOST` et `PORT` pour changer). Il doit être placé derrière HTTPS. `GET /health` vérifie le serveur et sa base.
+Le serveur écoute sur `127.0.0.1:8080` (`HOST` et `PORT` pour changer). Il doit être placé derrière HTTPS : définissez alors `TRUST_PROXY=1`, sinon tous vos clients partagent une seule limite de requêtes. N'activez cette variable que si le port du serveur n'est joignable que par le proxy. `GET /health` vérifie le serveur et sa base.
 
 ## 3. Créer le compte propriétaire
 
@@ -69,6 +69,6 @@ Sans Internet chez le client : il crée une demande dans le logiciel et vous la 
 
 1. Publiez la version dans **Versions**.
 2. Créez ou modifiez l'édition avec la nouvelle grande version couverte.
-3. Pour un client existant, une vente de mise à niveau n'est disponible que par l'API (`upgradeLicenseId` sur `POST /admin/sales`).
+3. Pour un client existant, dans **Nouvelle vente**, choisissez ce client, l'édition de la nouvelle version, puis le type de vente « Mise à niveau ». Le droit n'augmente qu'à la confirmation du paiement.
 
 Une licence reste valide pour les versions qu'elle couvre. Une grande version non couverte refuse de démarrer sans modifier les données, et le client peut réinstaller sa version.

@@ -23,7 +23,9 @@ interface Sale {
 function NewSale({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const customers = useApi<Customer[]>('/admin/customers');
   const editions = useApi<{ editions: Edition[] }>('/admin/editions');
-  const [form, setForm] = useState({ customerId: '', editionCode: '', amount: '' });
+  const [form, setForm] = useState({ customerId: '', editionCode: '', amount: '', upgradeLicenseId: '' });
+  const detail = useApi<{ licenses: { id: string; keyHint: string; editionName: string; status: string; isTrial: boolean }[] }>(form.customerId ? `/admin/customers/${form.customerId}` : null);
+  const upgradable = (detail.data?.licenses ?? []).filter((license) => !license.isTrial && (license.status === 'ACTIVE' || license.status === 'SUSPENDED'));
   const [error, setError] = useState<string | null>(null);
   const available = (editions.data?.editions ?? []).filter((edition) => edition.isActive);
   const selected = available.find((edition) => edition.code === form.editionCode);
@@ -34,11 +36,11 @@ function NewSale({ onDone, onCancel }: { onDone: () => void; onCancel: () => voi
         onSubmit={(event) => {
           event.preventDefault();
           setError(null);
-          api('/admin/sales', 'POST', { customerId: form.customerId, editionCode: form.editionCode, ...(form.amount ? { amount: Number(form.amount) } : {}) }).then(onDone).catch((cause: Error) => setError(cause.message));
+          api('/admin/sales', 'POST', { customerId: form.customerId, editionCode: form.editionCode, ...(form.amount ? { amount: Number(form.amount) } : {}), ...(form.upgradeLicenseId ? { upgradeLicenseId: form.upgradeLicenseId } : {}) }).then(onDone).catch((cause: Error) => setError(cause.message));
         }}
       >
         <Field label="Client">
-          <Select value={form.customerId} onChange={(event) => setForm({ ...form, customerId: event.target.value })}>
+          <Select value={form.customerId} onChange={(event) => setForm({ ...form, customerId: event.target.value, upgradeLicenseId: '' })}>
             <option value="">Choisir</option>
             {(customers.data ?? []).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
           </Select>
@@ -52,6 +54,16 @@ function NewSale({ onDone, onCancel }: { onDone: () => void; onCancel: () => voi
         <Field label="Montant convenu" hint={selected ? `Tarif : ${fcfa(selected.price)}` : 'Le tarif de l’édition par défaut.'}>
           <Input inputMode="numeric" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value.replace(/\D/g, '') })} />
         </Field>
+        {upgradable.length > 0 && (
+          <div className="sm:col-span-3">
+            <Field label="Type de vente" hint="Une mise à niveau étend une licence existante à la grande version de l'édition choisie.">
+              <Select value={form.upgradeLicenseId} onChange={(event) => setForm({ ...form, upgradeLicenseId: event.target.value })}>
+                <option value="">Nouvelle licence</option>
+                {upgradable.map((license) => <option key={license.id} value={license.id}>Mise à niveau de la licence …{license.keyHint} ({license.editionName})</option>)}
+              </Select>
+            </Field>
+          </div>
+        )}
         {error && <div className="sm:col-span-3"><Alert>{error}</Alert></div>}
         <p className="text-sm text-muted sm:col-span-3">La vente reste en attente : aucune clé n'est disponible tant que vous n'avez pas confirmé le paiement.</p>
         <div className="flex gap-2 sm:col-span-3">

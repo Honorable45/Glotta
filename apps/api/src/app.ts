@@ -17,6 +17,8 @@ export interface AppOptions {
   licensePrivateKey: string;
   now?: () => Date;
   rateLimitMax?: number;
+  /** Derrière un proxy HTTPS : sans cela, tous les clients partageraient une seule limite de requêtes. */
+  trustProxy?: boolean;
   /** Dossier compilé de la plateforme d'administration, servi sur /console. */
   adminDist?: string;
 }
@@ -32,8 +34,8 @@ const NOT_ACTIVATED = 'Ce poste n’est pas activé.';
 export async function buildApp(options: AppOptions) {
   const { db } = options;
   const now = options.now ?? (() => new Date());
-  const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
-  await app.register(rateLimit, { max: options.rateLimitMax ?? 120, timeWindow: '1 minute' });
+  const app = Fastify({ logger: false, bodyLimit: 256 * 1024, trustProxy: options.trustProxy ?? false });
+  await app.register(rateLimit, { max: options.rateLimitMax ?? 600, timeWindow: '1 minute' });
   const vault = createKeyVault(options.licensePrivateKey);
   const challengeKey = createHash('sha256').update(`challenge:${options.licensePrivateKey}`).digest();
 

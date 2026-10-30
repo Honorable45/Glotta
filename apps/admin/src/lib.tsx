@@ -38,11 +38,12 @@ export async function downloadFile(path: string, fileName: string) {
 
 export const saveText = (text: string, fileName: string) => saveBlob(new Blob([text], { type: 'text/plain' }), fileName);
 
-export function useApi<T>(path: string) {
+export function useApi<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => {
     setError(null);
+    if (!path) return Promise.resolve(setData(null));
     return api<T>(path).then(setData).catch((cause: Error) => setError(cause.message));
   }, [path]);
   useEffect(() => void reload(), [reload]);

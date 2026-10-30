@@ -8,7 +8,7 @@
 ## Jamais vérifié
 
 - **Windows réel** : tout le développement et les tests ont lieu sous Linux. La protection DPAPI, l'installateur et les mises à jour n'y ont pas été exercés.
-- **Installateur** : `pnpm dist:win` n'a jamais abouti sous Linux, à cause d'un délai réseau dépassé lors d'un téléchargement. Le workflow `windows.yml` n'a jamais été exécuté.
+- **Installateur** : il ne peut pas être construit sous Linux, car le module SQLite natif ne se compile pas pour Windows depuis Linux. Il doit l'être sous Windows ou par le workflow `windows.yml`, qui n'a encore jamais abouti.
 - **Impression réelle** sur une imprimante.
 - **Restauration complète** d'une sauvegarde avec redémarrage de l'application : le déchiffrement et le remplacement du fichier sont testés, pas le parcours entier.
 
@@ -18,6 +18,5 @@
 - Un fichier `licence.json` restauré à la main redonne l'ancien statut jusqu'à la prochaine connexion : le contrôle du jeton plus ancien protège seulement tant que le fichier actuel existe.
 - Réinstaller Windows ou remplacer l'ordinateur crée une nouvelle identité de poste : le vendeur doit libérer l'ancienne place si le transfert n'a pas été fait avant.
 - Un administrateur de la plateforme qui confirme un paiement engage la délivrance : aucune vérification externe n'existe, par choix du modèle de paiement manuel.
-- La mise à niveau d'une licence existante n'a pas encore d'écran sur la plateforme : l'API l'accepte (`upgradeLicenseId`).
 - Le numéro de reçu sert aussi de numéro de vente : ce n'est pas une facture fiscale. Vérifiez vos obligations locales.
 - Le journal d'activité chaîné est propre à chaque poste, et n'est pas synchronisé.
