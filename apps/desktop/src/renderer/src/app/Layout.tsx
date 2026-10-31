@@ -1,11 +1,22 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
+import { ChevronDown, LogOut } from 'lucide-react';
 import { roleLabels } from '@gestion/domain';
 import { call } from '../lib/api';
 import { useLicense } from '../lib/license';
 import { useSession } from '../lib/session';
 import { LicenseBanner } from '../features/license/LicenseBanner';
-import { navigation } from './navigation';
+import { navigation, type NavItem } from './navigation';
+
+const MORE_KEY = 'glotta.menu.plus';
+
+function readMoreOpen(): boolean {
+  try {
+    return localStorage.getItem(MORE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 export function Layout() {
   const { pathname } = useLocation();
@@ -16,25 +27,44 @@ export function Layout() {
   // Comparaison exacte d'abord : /ventes ne doit pas être pris pour /vente.
   const current = items.find((item) => pathname === item.path) ?? items.find((item) => pathname.startsWith(`${item.path}/`));
   const wide = !['/systeme'].some((path) => pathname.startsWith(path));
+  const [moreOpen, setMoreOpen] = useState(readMoreOpen);
+  const toggleMore = () => {
+    setMoreOpen(!moreOpen);
+    try {
+      localStorage.setItem(MORE_KEY, moreOpen ? '0' : '1');
+    } catch {
+      // Simple confort : sans stockage, le menu repart fermé.
+    }
+  };
+  const showMore = moreOpen || Boolean(current && !current.daily);
+  const others = items.filter((item) => !item.daily);
+  const link = ({ path, label, icon: Icon }: NavItem) => (
+    <NavLink
+      key={path}
+      to={path}
+      className={({ isActive }) =>
+        `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+          isActive ? 'bg-selected font-medium text-selected-text' : 'text-muted hover:bg-canvas hover:text-text'
+        }`
+      }
+    >
+      <Icon size={16} strokeWidth={1.75} aria-hidden />
+      {label}
+    </NavLink>
+  );
   return (
     <div className="flex h-screen">
       <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-sidebar">
         <div className="px-5 py-4 text-sm font-semibold tracking-tight">Glotta</div>
         <nav aria-label="Navigation principale" className="flex flex-col gap-0.5 overflow-y-auto px-2.5">
-          {items.map(({ path, label, icon: Icon }) => (
-            <NavLink
-              key={path}
-              to={path}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                  isActive ? 'bg-selected font-medium text-selected-text' : 'text-muted hover:bg-canvas hover:text-text'
-                }`
-              }
-            >
-              <Icon size={16} strokeWidth={1.75} aria-hidden />
-              {label}
-            </NavLink>
-          ))}
+          {items.filter((item) => item.daily).map(link)}
+          {others.length > 0 && (
+            <button type="button" aria-expanded={showMore} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted hover:bg-canvas hover:text-text" onClick={toggleMore}>
+              <ChevronDown size={16} strokeWidth={1.75} aria-hidden className={showMore ? 'rotate-180' : ''} />
+              {showMore ? 'Moins' : 'Plus'}
+            </button>
+          )}
+          {showMore && others.map(link)}
         </nav>
         <div className="mt-auto flex items-center justify-between gap-2 border-t border-border px-4 py-3">
           <p className="min-w-0 text-xs">

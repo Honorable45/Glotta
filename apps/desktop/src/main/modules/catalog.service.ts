@@ -183,21 +183,26 @@ export function createCatalogService({ db, deviceId }: Context) {
 
     async posSearch(rawQuery: string): Promise<PosItem[]> {
       const query = rawQuery.trim();
-      if (!query) return [];
       const search = normalizeSearch(query);
       const storeId = await requireStoreId(db);
-      const serial = await db.serialUnit.findUnique({ where: { serial: query } });
+      const serial = query ? await db.serialUnit.findUnique({ where: { serial: query } }) : null;
       const variants = await db.productVariant.findMany({
         where: {
           archivedAt: null,
           product: { archivedAt: null },
-          OR: [
-            { barcode: query },
-            ...(serial ? [{ id: serial.variantId }] : []),
-            { product: { searchText: { contains: search } } },
-          ],
+          // Sans recherche, l'écran de vente montre directement les produits.
+          ...(query
+            ? {
+                OR: [
+                  { barcode: query },
+                  ...(serial ? [{ id: serial.variantId }] : []),
+                  { product: { searchText: { contains: search } } },
+                ],
+              }
+            : {}),
         },
-        take: 30,
+        take: query ? 30 : 60,
+        orderBy: { product: { name: 'asc' } },
         include: { product: { include: { unit: true } }, stockLevels: { select: { quantity: true }, where: { storeId } } },
       });
       const items = variants.map((variant): PosItem => {

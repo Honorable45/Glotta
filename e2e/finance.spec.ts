@@ -14,23 +14,24 @@ async function creditSale(page: Page) {
   await go(page, 'Produits');
   await page.getByRole('button', { name: 'Nouveau produit' }).click();
   await page.getByLabel('Nom du produit').fill('Savon');
+  await page.getByRole('button', { name: "Plus d'options" }).click();
   await page.getByLabel('Code-barres').fill('555');
   await page.getByLabel("Prix d'achat").fill('600');
   await page.getByLabel('Prix de vente').fill('1000');
-  await page.getByLabel('Stock initial').fill('10');
+  await page.getByLabel('Quantité en stock').fill('10');
   await page.getByRole('button', { name: 'Enregistrer le produit' }).click();
   await expect(page.getByRole('cell', { name: 'Savon' })).toBeVisible();
   await go(page, 'Clients');
   await page.getByLabel('Nom', { exact: true }).fill('Afi');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByRole('button', { name: 'Afi' })).toBeVisible();
-  await go(page, 'Vente');
+  await go(page, 'Vendre');
   const search = page.getByLabel('Rechercher un produit');
   await search.fill('555');
   await search.press('Enter');
   await page.getByLabel('Quantité de Savon').fill('2');
-  await page.getByLabel('Client').selectOption({ label: 'Afi' });
   await page.getByLabel('Montant reçu').fill('500');
+  await page.getByRole('combobox', { name: /^Client/ }).selectOption({ label: 'Afi' });
   await page.getByRole('button', { name: 'Valider la vente' }).click();
   await expect(page.getByRole('status')).toContainText('enregistrée');
 }

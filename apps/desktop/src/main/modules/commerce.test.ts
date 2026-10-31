@@ -107,7 +107,7 @@ describe('produits', () => {
     expect((await catalog.posSearch('telephone'))[0]?.productName).toBe('Téléphone Écran');
     const [exact] = await catalog.posSearch('999');
     expect(exact?.exactMatch).toBe(true);
-    expect(await catalog.posSearch('   ')).toEqual([]);
+    expect((await catalog.posSearch('   ')).map((item) => item.productName)).toContain('Téléphone Écran');
   });
 
   it('un produit archivé n’est plus vendable, mais reste historisé', async () => {

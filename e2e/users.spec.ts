@@ -27,7 +27,7 @@ test('un vendeur ne voit que ses écrans, et le processus principal refuse le re
   await expect(page.getByRole('alert')).toContainText('incorrect');
 
   await login(page, 'koffi', 'vendeur123');
-  await expect(nav(page).getByRole('link', { name: 'Vente', exact: true })).toBeVisible();
+  await expect(nav(page).getByRole('link', { name: 'Vendre', exact: true })).toBeVisible();
   for (const hidden of ['Employés', 'Dépenses', 'Tableau de bord', 'Rapports', "Journal d'activité"]) {
     await expect(nav(page).getByRole('link', { name: hidden })).toHaveCount(0);
   }

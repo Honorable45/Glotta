@@ -42,9 +42,11 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
     })) ?? [emptyVariant()],
   );
   const [error, setError] = useState<string | null>(null);
+  // Le formulaire montre l'essentiel ; un produit qui utilise déjà le reste l'affiche d'emblée.
+  const [more, setMore] = useState(Boolean(product && (product.reference || product.categoryId || product.trackSerial || product.lowStockThreshold != null || product.taxRateBp > 0 || product.variants.length > 1 || product.variants.some((variant) => variant.label || variant.barcode))));
 
   useEffect(() => {
-    if (!unitId && units[0]) setUnitId(units[0].id);
+    if (!unitId && units[0]) setUnitId((units.find((unit) => unit.name === 'Pièce') ?? units[0]).id);
   }, [units, unitId]);
 
   const relevant = attributes.filter((attribute) => categoryId && attribute.categoryIds.includes(categoryId));
@@ -52,6 +54,10 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
 
   const save = () => {
     setError(null);
+    if (!name.trim()) {
+      setError('Écrivez le nom du produit.');
+      return;
+    }
     const taxRate = Number(tax.replace(',', '.'));
     if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
       setError('Taux de taxe invalide.');
@@ -67,6 +73,11 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
       const purchasePrice = tryAmount(row.purchasePrice, currency);
       const salePrice = tryAmount(row.salePrice, currency);
       const initialQuantity = row.initialQuantity.trim() ? tryQuantity(row.initialQuantity) : 0n;
+      // Sans quantité, le produit ne pourrait pas être vendu : on le dit ici, pas à la caisse.
+      if (!row.id && !trackSerial && !row.initialQuantity.trim()) {
+        setError('Indiquez la quantité en stock. Écrivez 0 si vous n’en avez pas encore.');
+        return;
+      }
       if (purchasePrice === null || salePrice === null || purchasePrice < 0n || salePrice < 0n) {
         setError('Renseignez un prix d’achat et un prix de vente valides.');
         return;
@@ -95,8 +106,34 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
 
   return (
     <Card title={product ? 'Modifier le produit' : 'Nouveau produit'}>
+      <Field label="Nom du produit"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field>
+
+      <ul className="mt-4 flex flex-col gap-3">
+        {variants.map((row, index) => {
+          const purchase = tryAmount(row.purchasePrice, currency);
+          const sale = tryAmount(row.salePrice, currency);
+          return (
+            <li key={row.id ?? `new-${index}`} className={`grid items-start gap-2.5 ${more ? 'grid-cols-6 rounded-md bg-canvas p-3' : 'grid-cols-3'}`}>
+              {more && <Field label="Variante"><Input placeholder="Noir, 128 Go" value={row.label} onChange={(event) => setVariant(index, { label: event.target.value })} /></Field>}
+              {more && <Field label="Code-barres"><Input value={row.barcode} onChange={(event) => setVariant(index, { barcode: event.target.value })} /></Field>}
+              <Field label="Prix d'achat"><Input inputMode="numeric" value={row.purchasePrice} onChange={(event) => setVariant(index, { purchasePrice: event.target.value })} /></Field>
+              <Field label="Prix de vente" hint={purchase !== null && sale !== null ? `Marge : ${money(sale - purchase)}` : undefined}><Input inputMode="numeric" value={row.salePrice} onChange={(event) => setVariant(index, { salePrice: event.target.value })} /></Field>
+              <Field label="Quantité en stock" hint={row.id ? 'À changer depuis la page Stock.' : undefined}><Input disabled={Boolean(row.id) || trackSerial} value={row.initialQuantity} onChange={(event) => setVariant(index, { initialQuantity: event.target.value })} /></Field>
+              {more && (
+                <div className="pt-6">
+                  {variants.length > 1 && <Button variant="secondary" onClick={() => setVariants(variants.filter((_, position) => position !== index))}>Retirer</Button>}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {!more && <button type="button" className="mt-4 text-sm text-primary underline" onClick={() => setMore(true)}>Plus d'options</button>}
+
+      {more && <div className="mt-5 border-t border-border pt-4">
+      <div className="mb-4"><Button variant="secondary" onClick={() => setVariants([...variants, emptyVariant()])}>Ajouter une variante</Button></div>
       <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-2"><Field label="Nom du produit"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field></div>
         <Field label="Référence"><Input value={reference} onChange={(event) => setReference(event.target.value)} /></Field>
         <Field label="Catégorie">
           <Select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
@@ -142,34 +179,11 @@ function ProductForm({ product, onDone }: { product: Product | null; onDone: () 
         </div>
       )}
 
-      <div className="mt-5 border-t border-border pt-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Prix et variantes</h3>
-          <Button variant="secondary" onClick={() => setVariants([...variants, emptyVariant()])}>Ajouter une variante</Button>
-        </div>
-        <ul className="flex flex-col gap-3">
-          {variants.map((row, index) => {
-            const purchase = tryAmount(row.purchasePrice, currency);
-            const sale = tryAmount(row.salePrice, currency);
-            return (
-              <li key={row.id ?? `new-${index}`} className="grid grid-cols-6 items-start gap-2.5 rounded-md bg-canvas p-3">
-                <Field label="Variante"><Input placeholder="Noir, 128 Go" value={row.label} onChange={(event) => setVariant(index, { label: event.target.value })} /></Field>
-                <Field label="Code-barres"><Input value={row.barcode} onChange={(event) => setVariant(index, { barcode: event.target.value })} /></Field>
-                <Field label="Prix d'achat"><Input value={row.purchasePrice} onChange={(event) => setVariant(index, { purchasePrice: event.target.value })} /></Field>
-                <Field label="Prix de vente" hint={purchase !== null && sale !== null ? `Marge : ${money(sale - purchase)}` : undefined}><Input value={row.salePrice} onChange={(event) => setVariant(index, { salePrice: event.target.value })} /></Field>
-                <Field label="Stock initial"><Input disabled={Boolean(row.id) || trackSerial} value={row.initialQuantity} onChange={(event) => setVariant(index, { initialQuantity: event.target.value })} /></Field>
-                <div className="pt-6">
-                  {variants.length > 1 && <Button variant="secondary" onClick={() => setVariants(variants.filter((_, position) => position !== index))}>Retirer</Button>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+      </div>}
 
       {error && <div className="mt-4"><Alert>{error}</Alert></div>}
       <div className="mt-5 flex gap-2">
-        <Button disabled={!name.trim() || !unitId} onClick={save}>Enregistrer le produit</Button>
+        <Button disabled={!unitId} onClick={save}>Enregistrer le produit</Button>
         <Button variant="secondary" onClick={onDone}>Annuler</Button>
       </div>
     </Card>

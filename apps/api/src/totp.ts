@@ -3,7 +3,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 export function newTotpSecret(): string {
-  return [...randomBytes(20)].map((byte) => ALPHABET[byte % 32]).join('');
+  // 32 caractères, soit 160 bits : une longueur que toutes les applications décodent de la même façon.
+  return [...randomBytes(32)].map((byte) => ALPHABET[byte % 32]).join('');
 }
 
 function decode(secret: string): Buffer {

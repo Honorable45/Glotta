@@ -20,6 +20,11 @@ export function testLicense(changes: Partial<LicensePayload> = {}): string {
   );
 }
 
+/** Les tests atteignent tous les écrans ; le menu réduit a son propre test. */
+async function openFullMenu(page: Page): Promise<void> {
+  await page.evaluate(() => localStorage.setItem('glotta.menu.plus', '1'));
+}
+
 export const newUserData = () => mkdtempSync(join(tmpdir(), 'gestion-e2e-'));
 
 export async function launch(userData: string, license: string | null = testLicense()): Promise<{ app: ElectronApplication; page: Page }> {
@@ -30,6 +35,7 @@ export async function launch(userData: string, license: string | null = testLice
     env: { ...env, GESTION_USER_DATA: userData, GESTION_ALLOW_BASIC_STORAGE: '1', GESTION_LICENSE_PUBLIC_KEY: keys.publicKeyPem, ...(license ? { GESTION_TEST_LICENSE: license } : {}) } as Record<string, string>,
   });
   const page = await app.firstWindow();
+  await openFullMenu(page);
   const wizard = page.getByRole('heading', { name: 'Configuration de votre commerce' });
   const loginTitle = page.getByRole('heading', { name: 'Connexion' });
   await wizard.or(loginTitle).waitFor();
@@ -51,7 +57,9 @@ export async function launchWithServer(userData: string, apiUrl: string | null, 
     args: [resolve('apps/desktop')],
     env: { ...env, GESTION_USER_DATA: userData, GESTION_ALLOW_BASIC_STORAGE: '1', GESTION_LICENSE_PUBLIC_KEY: publicKey, ...(apiUrl ? { GESTION_API_URL: apiUrl } : {}) } as Record<string, string>,
   });
-  return { app, page: await app.firstWindow() };
+  const page = await app.firstWindow();
+  await openFullMenu(page);
+  return { app, page };
 }
 
 /** Le code de récupération est imposé au premier lancement. */

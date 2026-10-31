@@ -22,7 +22,7 @@ test('rappel : WhatsApp s’ouvre avec le texte, l’état dit seulement « ouve
   await page.getByLabel('Nom du produit').fill('Savon');
   await page.getByLabel("Prix d'achat").fill('1');
   await page.getByLabel('Prix de vente').fill('2000');
-  await page.getByLabel('Stock initial').fill('5');
+  await page.getByLabel('Quantité en stock').fill('5');
   await page.getByRole('button', { name: 'Enregistrer le produit' }).click();
   await expect(page.getByRole('cell', { name: 'Savon' })).toBeVisible();
   await go(page, 'Clients');
@@ -30,12 +30,12 @@ test('rappel : WhatsApp s’ouvre avec le texte, l’état dit seulement « ouve
   await page.getByLabel('WhatsApp').fill('90123456');
   await page.getByRole('button', { name: 'Enregistrer' }).click();
   await expect(page.getByRole('button', { name: 'Kossi' })).toBeVisible();
-  await go(page, 'Vente');
+  await go(page, 'Vendre');
   const search = page.getByLabel('Rechercher un produit');
   await search.fill('Savon');
   await page.getByRole('button', { name: /Savon/ }).click();
-  await page.getByLabel('Client').selectOption({ label: 'Kossi' });
   await page.getByLabel('Montant reçu').fill('500');
+  await page.getByRole('combobox', { name: /^Client/ }).selectOption({ label: 'Kossi' });
   await page.getByRole('button', { name: 'Valider la vente' }).click();
   await expect(page.getByRole('status')).toContainText('enregistrée');
 

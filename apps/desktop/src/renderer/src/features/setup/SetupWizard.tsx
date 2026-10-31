@@ -141,7 +141,9 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
           )}
 
           {step === 2 && (
-            <div className="flex flex-col gap-5">
+            <details>
+            <summary className="cursor-pointer text-sm text-primary underline">Tout est déjà prêt : cliquez sur Continuer. Ouvrir ici pour changer les réglages.</summary>
+            <div className="mt-4 flex flex-col gap-5">
               <TagList label="Catégories" items={input.categories} placeholder="Ajouter une catégorie, puis Entrée" onChange={(categories) => setInput({ ...input, categories })} />
               <div>
                 <TagList
@@ -209,6 +211,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
                 </div>
               </div>
             </div>
+            </details>
           )}
 
           {step === 3 && (

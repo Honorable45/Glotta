@@ -9,17 +9,19 @@ export interface NavItem {
   permission?: Permission;
   /** Fonction réservée à certaines formules. */
   feature?: string;
+  /** Usage de tous les jours : toujours visible. Le reste attend derrière « Plus ». */
+  daily?: boolean;
 }
 
 /** Une entrée n'est ajoutée ici que lorsque son module fonctionne réellement. */
 export const navigation: NavItem[] = [
-  { path: '/tableau-de-bord', label: 'Tableau de bord', icon: LayoutDashboard, permission: 'view_dashboard' },
-  { path: '/vente', label: 'Vente', icon: ShoppingCart, permission: 'sell' },
-  { path: '/ventes', label: 'Ventes', icon: ReceiptText, permission: 'sell' },
-  { path: '/produits', label: 'Produits', icon: Package, permission: 'manage_products' },
-  { path: '/stock', label: 'Stock', icon: Boxes, permission: 'manage_stock' },
-  { path: '/clients', label: 'Clients', icon: Users },
-  { path: '/dettes', label: 'Dettes', icon: HandCoins, permission: 'view_debts' },
+  { path: '/vente', label: 'Vendre', icon: ShoppingCart, permission: 'sell', daily: true },
+  { path: '/ventes', label: 'Mes ventes', icon: ReceiptText, permission: 'sell', daily: true },
+  { path: '/produits', label: 'Produits', icon: Package, permission: 'manage_products', daily: true },
+  { path: '/stock', label: 'Stock', icon: Boxes, permission: 'manage_stock', daily: true },
+  { path: '/clients', label: 'Clients', icon: Users, daily: true },
+  { path: '/dettes', label: 'Dettes', icon: HandCoins, permission: 'view_debts', daily: true },
+  { path: '/tableau-de-bord', label: 'Tableau de bord', icon: LayoutDashboard, permission: 'view_dashboard', daily: true },
   { path: '/rappels', label: 'Rappels', icon: BellRing, permission: 'view_debts', feature: 'reminders' },
   { path: '/depenses', label: 'Dépenses', icon: Wallet, permission: 'manage_expenses', feature: 'expenses' },
   { path: '/caisse', label: 'Caisse', icon: Vault, permission: 'manage_cash', feature: 'cash' },
